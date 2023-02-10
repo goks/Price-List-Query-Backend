@@ -1,5 +1,7 @@
 service-account/
 
+*.json
+*.exe
 # Byte-compiled / optimized / DLL files
 __pycache__/
 output/
@@ -132,3 +134,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+output/ouput.json

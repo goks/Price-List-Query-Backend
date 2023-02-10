@@ -1,0 +1,596 @@
+﻿
+[Header]
+ProjectFileVersion = 1.1
+[General]
+Program name = Price List Updater
+Program version = 1.1
+Windows 2000 = 0
+Windows XP = 1
+Windows Server 2003 = 1
+Windows Vista = 1
+Windows Server 2008 = 1
+Windows 7 = 1
+Windows 8 = 1
+Windows 10 = 1
+Windows Server 2016 = 1
+DoNotCheckOS = 0
+Company name = Neo Productions
+Website = https://
+SFA = 0
+DFA = 0
+Comp = 1
+[Graphics]
+Wizard image = <main>
+Header image = <main>
+Show Label = 1
+VisualStylesEnabled = 1
+[Files]
+Installation path = <ProgramFiles>\<Company>\<AppName>\
+Autcip = 1
+[Uninstall]
+Vwau = 0
+Website = https://
+Include uninstaller = 1
+Uninstaller filename = Uninstall
+UseCustomDisplayIcon = 0
+CustomDisplayIcon = <InstallPath>\
+[Licence]
+Licence dialog = 0
+[Finish]
+Sart program = 1
+Reboot computer = 0
+Program = <InstallPath>\Price List Update.exe
+ProgramArguments = 
+[Shortcuts]
+Allowtc = 0
+Shortcut path = <Company>\<AppName>\
+[Serialoptions]
+Allows = 0
+Number = 1000
+Mask = #####-#####-#####-#####
+[SplashScreen]
+Image = C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\icons\48x48.bmp
+Sound = 
+Time = 2
+PlaySound = 0
+Allow = 0
+[Build]
+File = C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\setup.exe
+SetupIconPath = ..\icons\ancient.ico
+UninstallIconPath = ..\icons\ancient.ico
+CompressionMethod = 0
+CompressionLevel = 2
+[Updater]
+Allow = 0
+1 = <AppName>
+2 = <AppVersion>
+3 = http://
+4 = http://
+5 = http://
+6 = Update
+Language = 0
+RunProg = 
+RunProgs = 0
+Execdlls = 0
+[Languages]
+[Files/Dirs]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\Price List Update.exe
+3.5 MB
+exe
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\certifi\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_asyncio.pyd
+62 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_bz2.pyd
+83 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_ctypes.pyd
+122 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_decimal.pyd
+264 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_hashlib.pyd
+63 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_lzma.pyd
+157.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_multiprocessing.pyd
+28 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_overlapped.pyd
+44 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_queue.pyd
+27.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_socket.pyd
+77 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_ssl.pyd
+149.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_uuid.pyd
+21.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_win32sysloader.pyd
+12 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-console-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-datetime-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-debug-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-errorhandling-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-fibers-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-file-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-file-l1-2-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-file-l2-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-handle-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-heap-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-interlocked-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-libraryloader-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-localization-l1-2-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-memory-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-namedpipe-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-processenvironment-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-processthreads-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-processthreads-l1-1-1.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-profile-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-rtlsupport-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-string-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-synch-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-synch-l1-2-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-sysinfo-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-timezone-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-util-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-winrt-l1-1-0.dll
+19.2 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-winrt-string-l1-1-0.dll
+19.8 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-conio-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-convert-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-environment-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-filesystem-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-heap-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-locale-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-math-l1-1-0.dll
+28.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-multibyte-l1-1-0.dll
+28.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-process-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-runtime-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-stdio-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-string-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-time-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-utility-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\base_library.zip
+1007 KB
+zip
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\core.py
+5.7 KB
+py
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\libcrypto-1_1.dll
+3.2 MB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\libffi-7.dll
+32 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\libssl-1_1.dll
+673 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\mfc140u.dll
+5.8 MB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\Price List Update.exe
+3.5 MB
+exe
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\pyexpat.pyd
+184.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\pyodbc.cp39-win_amd64.pyd
+131.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\python3.dll
+57 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\python39.dll
+4.3 MB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\select.pyd
+26.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\ucrtbase.dll
+1.1 MB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\unicodedata.pyd
+1.1 MB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\VCRUNTIME140.dll
+99.3 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\VCRUNTIME140_1.dll
+43.3 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\win32api.pyd
+131 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\win32trace.pyd
+22 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\win32ui.pyd
+1.4 MB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\fonts\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\google_api_core-1.26.3.dist-info\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\google_auth-1.30.0.dist-info\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\google_cloud_core-1.6.0.dist-info\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\google_cloud_firestore-2.1.1.dist-info\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\grpc\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\grpcio-1.37.1.dist-info\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\GUI\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\httplib2\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\icons\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\output\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\PySide2\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\pytz\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\pywin32_system32\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\service-account\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\shiboken2\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\win32com\
+N/A
+[Folder]
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_asyncio.pyd
+62 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_bz2.pyd
+83 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_ctypes.pyd
+122 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_decimal.pyd
+264 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_hashlib.pyd
+63 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_lzma.pyd
+157.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_multiprocessing.pyd
+28 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_overlapped.pyd
+44 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_queue.pyd
+27.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_socket.pyd
+77 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_ssl.pyd
+149.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_uuid.pyd
+21.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\_win32sysloader.pyd
+12 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-console-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-datetime-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-debug-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-errorhandling-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-fibers-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-file-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-file-l1-2-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-file-l2-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-handle-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-heap-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-interlocked-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-libraryloader-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-localization-l1-2-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-memory-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-namedpipe-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-processenvironment-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-processthreads-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-processthreads-l1-1-1.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-profile-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-rtlsupport-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-string-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-synch-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-synch-l1-2-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-sysinfo-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-timezone-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-util-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-winrt-l1-1-0.dll
+19.2 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-core-winrt-string-l1-1-0.dll
+19.8 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-conio-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-convert-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-environment-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-filesystem-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-heap-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-locale-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-math-l1-1-0.dll
+28.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-multibyte-l1-1-0.dll
+28.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-process-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-runtime-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-stdio-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-string-l1-1-0.dll
+24.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-time-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\api-ms-win-crt-utility-l1-1-0.dll
+20.5 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\base_library.zip
+1007 KB
+zip
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\core.py
+5.7 KB
+py
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\libcrypto-1_1.dll
+3.2 MB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\libffi-7.dll
+32 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\libssl-1_1.dll
+673 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\mfc140u.dll
+5.8 MB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\Price List Update.exe
+3.5 MB
+exe
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\pyexpat.pyd
+184.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\pyodbc.cp39-win_amd64.pyd
+131.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\python3.dll
+57 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\python39.dll
+4.3 MB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\select.pyd
+26.5 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\ucrtbase.dll
+1.1 MB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\unicodedata.pyd
+1.1 MB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\VCRUNTIME140.dll
+99.3 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\VCRUNTIME140_1.dll
+43.3 KB
+dll
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\win32api.pyd
+131 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\win32trace.pyd
+22 KB
+pyd
+C:\Users\Gokul\Desktop\PROGRAM FILES\Price-List-Query-Backend\dist\main\win32ui.pyd
+1.4 MB
+pyd
+[Licence_Begin]
+122
+{\rtf1\ansi\ansicpg1252\deff0\deflang1033{\fonttbl{\f0\fnil\fcharset0 Arial;}}
+\viewkind4\uc1\pard\cf0\fs20 Pri\par
+}
+ [Licence_End]
+[Registry]
+[Variables]
+[SCs]
+Desktop
+Price List Update
+<InstallPath>\Price List Update.exe
+
+<InstallPath>\icons\48x48.ico
+0
+[IFP_End]
+[Serials]
+[Serials_End]
+[Commands]
