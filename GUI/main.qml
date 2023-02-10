@@ -8,7 +8,7 @@ Window {
     width: 753
     height: 589
     visible: true
-    title: "Staff App Price Updater"
+    title: "Price List Update"
 
     FontLoader { id: boldPoppins; name: "Poppins"; source: "../fonts/Poppins-Bold.ttf" }
     FontLoader { id: regularPoppins; name: "Poppins"; source: "../fonts/Poppins-Regular.ttf" }

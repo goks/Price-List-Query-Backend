@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 import sys
-
+from PySide2 import QtGui
 from PySide2.QtGui import QGuiApplication, QIcon
 from PySide2.QtQml import QQmlApplicationEngine
 from PySide2.QtCore import QObject, Signal, Property,Slot,QRunnable, QThreadPool
@@ -15,6 +15,13 @@ import core as C
 
 
 IND = pytz.timezone('Asia/Calcutta')
+
+try:
+    from ctypes import windll  # Only exists on Windows.
+    myappid = 'neoproductions.pricelistquery.backend.1.1'
+    windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+except ImportError:
+    pass
 
 class MainWindow(QObject):
     def __init__(self):
@@ -125,7 +132,7 @@ class MainWindow(QObject):
         print("Upload OK")
         
         a = json.dumps(itemList.getArrayofItemDict())
-        with open("./output/ouput.json", "w") as outfile:
+        with open( os.fspath(Path(__file__).resolve().parent / "output/ouput.json"), "w") as outfile:
             json.dump(itemList.getArrayofItemDict(), outfile)    
         print("json dump at output/output.json")    
         return      
@@ -194,6 +201,7 @@ if __name__ == "__main__":
     engine = QQmlApplicationEngine()
     app.setOrganizationName('Neo Productions')
     app.setOrganizationDomain('Fly fly fly')
+    app.setWindowIcon(QtGui.QIcon(os.fspath(Path(__file__).resolve().parent / "icons/16x16.bmp")))
     
     #Get Context
     main = MainWindow()
