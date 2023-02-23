@@ -1,4 +1,6 @@
 service-account/
+itemImages/
+
 
 *.json
 *.exe

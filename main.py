@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import pytz
 import json
 import traceback
+import logging
 
 import core as C
 
@@ -121,19 +122,19 @@ class MainWindow(QObject):
         itemList = C.ItemList()
         itemList.prepareItemList()
         itemListdict = itemList.getItemList()
-        print("ItemList prepared. Ready to upload")
+        imagePathsList = itemList.getImagePathstoUpload()
+        logging.info("ItemList prepared. Ready to upload")
         progress_callback.emit(1)
         
         self.FB.remove_itemList()
         self.FB.set_itemList(itemListdict)
         self.FB.remove_itemListUpdateTime()
+        self.FB.uploadImages(imagePathsList)
         self.FB.set_itemListUpdateTime()
         progress_callback.emit(2)
         print("Upload OK")
         
-        a = json.dumps(itemList.getArrayofItemDict())
-        with open( os.fspath(Path(__file__).resolve().parent / "output/ouput.json"), "w") as outfile:
-            json.dump(itemList.getArrayofItemDict(), outfile)    
+        C.write_op_to_json(itemList)  
         print("json dump at output/output.json")    
         return      
       

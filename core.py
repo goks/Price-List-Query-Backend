@@ -1,25 +1,48 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[12]:
 
 
 import pyodbc as pd 
-import os, sys
+from PIL import Image
+import hashlib
+import json
+import os, sys, io
 import firebase_admin
 from firebase_admin import credentials, db
+from firebase_admin import storage
 from firebase_admin.firestore import SERVER_TIMESTAMP
 import datetime
 
+import logging
 
-# In[2]:
+
+# In[13]:
+
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')
+
+
+# In[14]:
+
+
+try:
+    # PyInstaller creates a temp folder and stores path in _MEIPASS
+        BASE_PATH = sys._MEIPASS
+except Exception:
+    BASE_PATH = os.path.abspath(".")
+ITEM_IMAGES_PATH = os.path.join(BASE_PATH, r"itemImages")   
+
+
+# In[15]:
 
 
 SERVERNAME = "GASERVER\BUSYSTDSQL"
 DATABASENAME = "BusyComp0004_db12022"
 
 
-# In[3]:
+# In[16]:
 
 
 class DB:
@@ -32,41 +55,45 @@ class DB:
         self.cursor.execute("SELECT Code,Name FROM Master1 WHERE MasterType=8 AND DeactiveMaster=0")
         return
     def getItems(self):
-        self.cursor.execute("SELECT * FROM Master1 WHERE MasterType=6 AND DeactiveMaster=0 AND BlockedMaster=0") 
+        self.cursor.execute("SELECT * FROM Master1 M LEFT JOIN Images I ON M.Code=I.Code WHERE MasterType=6 AND DeactiveMaster=0 AND BlockedMaster=0") 
         return
     def getCursor(self):
         return self.cursor      
     def __del__(self):
         self.conn.close()
-        print("DB Connection closed")
+        logging.info("DB Connection closed")
         return
 
 
-# In[4]:
+# In[17]:
 
 
 class Item:
     def __init__(self):
+        self.MasterCode = None
         self.Code = None
         self.Name = None
         self.PRICE3 = None
         self.Unit = None
         self.DiscPercent = None
         self.MRP = None
+        self.imageYes = False
         return
         
-    def __init__(self, Code, Name, PRICE3, Unit, DiscPercent = 0, MRP=0) -> None:
+    def __init__(self,MasterCode, Code, Name, PRICE3, Unit, DiscPercent = 0, MRP=0, imageYes=False) -> None:
+        self.MasterCode = MasterCode
         self.Code = Code
         self.Name = Name
         self.PRICE3 = PRICE3
         self.Unit = Unit
         self.DiscPercent = DiscPercent
         self.MRP = MRP
+        self.imageYes = imageYes
         return
         
 
 
-# In[5]:
+# In[18]:
 
 
 class ItemList:
@@ -75,6 +102,8 @@ class ItemList:
         self.db=DB()
         self.unit_dict = {}
         self.array_of_itemDict=[]
+        self.newImages=[]
+        
     def deleteDBObject(self):
         del self.db    
         return
@@ -93,7 +122,17 @@ class ItemList:
         output = output.replace(']', ')')
         for each in special_characters:
             output = output.replace(each,'*')
-        return output        
+        return output    
+    def checkifImageAlreadyPresent(self,imagePath, image):
+        if not os.path.isfile(imagePath):
+            logging.warning("image "+ imagePath+' does not exist')
+            return False
+        oldImage = Image.open(imagePath)
+        image.save(os.path.join(ITEM_IMAGES_PATH, 'temp.jpg'))   
+        image = Image.open(os.path.join(ITEM_IMAGES_PATH, 'temp.jpg'))
+        if hashlib.md5(image.tobytes()).hexdigest() != hashlib.md5(oldImage.tobytes()).hexdigest():
+            return False
+        return True
     def prepareItemList(self):   
         self.prepareUnitDict() 
         self.db.getItems()
@@ -102,7 +141,21 @@ class ItemList:
             row = self.cursor.fetchone()
             if not row:
                 break
-            i = Item(Code = self.cleanName(row.Alias), Name = self.cleanName(row.Name), PRICE3 = row.D3, Unit = self.unit_dict[row.CM1], DiscPercent = row.D16, MRP = row.D2)
+            i = Item(MasterCode=row.Code, Code = self.cleanName(row.Alias), Name = self.cleanName(row.Name), 
+                     PRICE3 = row.D3, Unit = self.unit_dict[row.CM1], DiscPercent = row.D16,
+                     MRP = row.D2, imageYes=True if row.Image1 else False)
+            if row.Image1:
+                im = row.Image1
+                imExt = row.FormatType1
+                image = Image.open(io.BytesIO(im))
+                imName = str(row.Code)
+                imagePath = os.path.join(ITEM_IMAGES_PATH, imName+imExt)
+                if not self.checkifImageAlreadyPresent(imagePath, image):    
+                    if not os.path.isdir(ITEM_IMAGES_PATH):
+                        os.mkdir(ITEM_IMAGES_PATH)
+                    image.save(imagePath)   
+                    self.newImages.append(imagePath)
+                    logging.info("image "+ imagePath+' saved.')                
             self.item_list[self.cleanName(row.Name)] = i.__dict__
             self.array_of_itemDict.append(i.__dict__)
         self.deleteDBObject()  
@@ -110,29 +163,27 @@ class ItemList:
         return self.item_list
     def getArrayofItemDict(self):
         return self.array_of_itemDict
+    def getImagePathstoUpload(self):
+        return self.newImages
 
 
-# In[6]:
+# In[19]:
 
 
 class FirebaseControls:
     def __init__(self):
         # correction for auto-py-to-exe
-        try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-            base_path = sys._MEIPASS
-        except Exception:
-            base_path = os.path.abspath(".")
-        certificate_path = os.path.join(base_path, r"service-account\\gokul-agencies-firebase-adminsdk-ti855-702f214fc5.json")
+        certificate_path = os.path.join(BASE_PATH, r"service-account\\gokul-agencies-firebase-adminsdk-ti855-702f214fc5.json")
         cred = credentials.Certificate(certificate_path)
         firebase_admin.initialize_app(cred, {
-            'databaseURL': 'https://gokul-agencies.firebaseio.com/'
+            'databaseURL': 'https://gokul-agencies.firebaseio.com/',
+            'storageBucket': 'gokul-agencies.appspot.com'
         })
         self.itemList_ref = db.reference("/item_list/") 
         self.itemListUpdateTime_ref = db.reference('/item_list_update_time/')
+        self.bucket = storage.bucket()
     def set_itemList(self, data):
         return self.itemList_ref.set(data)
-        return self.itemList_ref.child(child).set(data)
     def remove_itemList(self):
         return self.itemList_ref.set({}) 
         # return self.itemList_ref.child(child).set({}) 
@@ -154,34 +205,50 @@ class FirebaseControls:
         else: 
             raise TypeError    
         return dt_object
+    def uploadImages(self, imagePathsList):
+        for each in imagePathsList:
+            _, tail = os.path.split(each)
+            blob = self.bucket.blob(tail)
+            blob.upload_from_filename(each)
+        return
+        
 
 
-# In[7]:
+# In[21]:
+
+
+def write_op_to_json(itemList):
+    a = {}
+    a['itemList'] = itemList.getArrayofItemDict()
+    a['imagePathsList'] = itemList.getImagePathstoUpload()
+    if not os.path.isdir('output'):
+        os.mkdir('output')
+    outFile = os.path.join(BASE_PATH, r"output\\output.json")
+    with open(outFile, "w", encoding='utf-8' ) as outfile:
+        json.dump(a, outfile,ensure_ascii=False, indent=4)
+
+
+# In[20]:
 
 
 # itemList = ItemList()
 # itemList.prepareItemList()
 # itemListdict = itemList.getItemList()
-# print("ItemList prepared. Ready to upload")
+# imagePathsList = itemList.getImagePathstoUpload()
+# logging.info("ItemList prepared. Ready to upload")
 
 
-# In[8]:
+# In[22]:
 
 
-# import json
-# a = json.dumps(itemList.getArrayofItemDict())
-# with open("./output/ouput.json", "w") as outfile:
-#     json.dump(itemList.getArrayofItemDict(), outfile)
-
-
-# In[9]:
-
-
+# write_op_to_json(itemList)
 # firebaseControl = FirebaseControls()
 
 # print(firebaseControl.remove_itemList())
 # print(firebaseControl.set_itemList(itemListdict))
 # print(firebaseControl.remove_itemListUpdateTime())
+# print(firebaseControl.uploadImages(imagePathsList))
+
 # print(firebaseControl.set_itemListUpdateTime())
 # print("Upload OK")
 
