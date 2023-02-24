@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[12]:
+# In[107]:
 
 
 import pyodbc as pd 
@@ -18,13 +18,13 @@ import datetime
 import logging
 
 
-# In[13]:
+# In[108]:
 
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')
 
 
-# In[14]:
+# In[109]:
 
 
 try:
@@ -35,14 +35,14 @@ except Exception:
 ITEM_IMAGES_PATH = os.path.join(BASE_PATH, r"itemImages")   
 
 
-# In[15]:
+# In[110]:
 
 
 SERVERNAME = "GASERVER\BUSYSTDSQL"
 DATABASENAME = "BusyComp0004_db12022"
 
 
-# In[16]:
+# In[111]:
 
 
 class DB:
@@ -55,7 +55,7 @@ class DB:
         self.cursor.execute("SELECT Code,Name FROM Master1 WHERE MasterType=8 AND DeactiveMaster=0")
         return
     def getItems(self):
-        self.cursor.execute("SELECT * FROM Master1 M LEFT JOIN Images I ON M.Code=I.Code WHERE MasterType=6 AND DeactiveMaster=0 AND BlockedMaster=0") 
+        self.cursor.execute("SELECT M.Code,MasterType,Name, Alias,D3,CM1,D16,D2,Image1,FormatType1 FROM Master1 M LEFT JOIN Images I ON M.Code=I.Code WHERE MasterType=6 AND DeactiveMaster=0 AND BlockedMaster=0") 
         return
     def getCursor(self):
         return self.cursor      
@@ -65,7 +65,7 @@ class DB:
         return
 
 
-# In[17]:
+# In[112]:
 
 
 class Item:
@@ -93,7 +93,7 @@ class Item:
         
 
 
-# In[18]:
+# In[113]:
 
 
 class ItemList:
@@ -141,6 +141,7 @@ class ItemList:
             row = self.cursor.fetchone()
             if not row:
                 break
+            
             i = Item(MasterCode=row.Code, Code = self.cleanName(row.Alias), Name = self.cleanName(row.Name), 
                      PRICE3 = row.D3, Unit = self.unit_dict[row.CM1], DiscPercent = row.D16,
                      MRP = row.D2, imageYes=True if row.Image1 else False)
@@ -167,7 +168,7 @@ class ItemList:
         return self.newImages
 
 
-# In[19]:
+# In[114]:
 
 
 class FirebaseControls:
@@ -214,7 +215,7 @@ class FirebaseControls:
         
 
 
-# In[21]:
+# In[115]:
 
 
 def write_op_to_json(itemList):
@@ -228,7 +229,7 @@ def write_op_to_json(itemList):
         json.dump(a, outfile,ensure_ascii=False, indent=4)
 
 
-# In[20]:
+# In[116]:
 
 
 # itemList = ItemList()
@@ -238,7 +239,7 @@ def write_op_to_json(itemList):
 # logging.info("ItemList prepared. Ready to upload")
 
 
-# In[22]:
+# In[117]:
 
 
 # write_op_to_json(itemList)
