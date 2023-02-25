@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[29]:
+# In[39]:
 
 
 import pyodbc as pd 
@@ -18,13 +18,13 @@ import datetime
 import logging
 
 
-# In[30]:
+# In[40]:
 
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')
 
 
-# In[31]:
+# In[41]:
 
 
 try:
@@ -35,14 +35,14 @@ except Exception:
 ITEM_IMAGES_PATH = os.path.join(BASE_PATH, r"itemImages")   
 
 
-# In[32]:
+# In[42]:
 
 
 SERVERNAME = "GASERVER\BUSYSTDSQL"
 DATABASENAME = "BusyComp0004_db12022"
 
 
-# In[33]:
+# In[43]:
 
 
 class DB:
@@ -65,7 +65,7 @@ class DB:
         return
 
 
-# In[34]:
+# In[44]:
 
 
 class Item:
@@ -80,9 +80,10 @@ class Item:
         self.imageYes = False
         self.imageH = 0
         self.imageW = 0
+        self.imageExt = None
         return
         
-    def __init__(self,MasterCode, Code, Name, PRICE3, Unit, DiscPercent = 0, MRP=0, imageYes=False, imageH=0, imageW=0) -> None:
+    def __init__(self,MasterCode, Code, Name, PRICE3, Unit, DiscPercent = 0, MRP=0, imageYes=False, imageH=0, imageW=0, imageExt=None) -> None:
         self.MasterCode = MasterCode
         self.Code = Code
         self.Name = Name
@@ -93,11 +94,12 @@ class Item:
         self.imageYes = imageYes
         self.imageH = imageH
         self.imageW = imageW
+        self.imageExt = imageExt
         return
         
 
 
-# In[35]:
+# In[45]:
 
 
 class ItemList:
@@ -146,7 +148,7 @@ class ItemList:
             if not row:
                 break
             im = None
-            imExt = None
+            imExt = ''
             image = None
             width, height = (0,0)
             if row.Image1:
@@ -156,7 +158,7 @@ class ItemList:
                 width, height = image.size
             i = Item(MasterCode=row.Code, Code = self.cleanName(row.Alias), Name = self.cleanName(row.Name), 
                      PRICE3 = row.D3, Unit = self.unit_dict[row.CM1], DiscPercent = row.D16,
-                     MRP = row.D2, imageYes=True if row.Image1 else False, imageH=height, imageW=width)
+                     MRP = row.D2, imageYes=True if row.Image1 else False, imageH=height, imageW=width, imageExt=imExt)
             if im:
                 imName = str(row.Code)
                 imagePath = os.path.join(ITEM_IMAGES_PATH, imName+imExt)
@@ -177,7 +179,7 @@ class ItemList:
         return self.newImages
 
 
-# In[36]:
+# In[46]:
 
 
 class FirebaseControls:
@@ -224,7 +226,7 @@ class FirebaseControls:
         
 
 
-# In[37]:
+# In[47]:
 
 
 def write_op_to_json(itemList):
@@ -238,17 +240,17 @@ def write_op_to_json(itemList):
         json.dump(a, outfile,ensure_ascii=False, indent=4)
 
 
-# In[38]:
+# In[48]:
 
 
-itemList = ItemList()
-itemList.prepareItemList()
-itemListdict = itemList.getItemList()
-imagePathsList = itemList.getImagePathstoUpload()
-logging.info("ItemList prepared. Ready to upload")
+# itemList = ItemList()
+# itemList.prepareItemList()
+# itemListdict = itemList.getItemList()
+# imagePathsList = itemList.getImagePathstoUpload()
+# logging.info("ItemList prepared. Ready to upload")
 
 
-# In[ ]:
+# In[50]:
 
 
 # write_op_to_json(itemList)
