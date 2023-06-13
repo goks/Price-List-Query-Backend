@@ -19,7 +19,7 @@ IND = pytz.timezone('Asia/Calcutta')
 
 try:
     from ctypes import windll  # Only exists on Windows.
-    myappid = 'neoproductions.pricelistquery.backend.1.1'
+    myappid = 'neoproductions.pricelistquery.backend.1.2'
     windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 except ImportError:
     pass
