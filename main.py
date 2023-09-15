@@ -40,7 +40,7 @@ class MainWindow(QObject):
         
     def setLastUpdatedTime(self,time="default"):
         try:
-            timestamp_obj = self.FB.get_itemListUpdateTime_dt_obj()
+            timestamp_obj = self.FB.get_latestServerUpdateTime()
         except :
             self._lastUpdatedTime = "Cannot get data, check internet conn."   
         else:
@@ -120,21 +120,22 @@ class MainWindow(QObject):
     
     def updationFuctions(self, progress_callback):
         itemList = C.ItemList()
-        itemList.prepareItemList()
+        currentTime = datetime.utcnow()
+        print(C.convert_UTC_to_India_zone(currentTime))
+        previousUpdateTimestamp = self.FB.get_latestServerUpdateTime()
+        itemList.prepareItemList( C.convert_UTC_to_India_zone(currentTime), C.convert_UTC_to_India_zone(previousUpdateTimestamp) )
         itemListdict = itemList.getItemList()
         imagePathsList = itemList.getImagePathstoUpload()
         logging.info("ItemList prepared. Ready to upload")
         progress_callback.emit(1)
         
-        self.FB.remove_itemList()
-        self.FB.set_itemList(itemListdict)
-        self.FB.remove_itemListUpdateTime()
+        self.FB.set_itemFromItemList(itemList.getArrayofItemDict())
         self.FB.uploadImages(imagePathsList)
-        self.FB.set_itemListUpdateTime()
+        self.FB.set_latestServerUpdateTime(currentTime)
         progress_callback.emit(2)
         print("Upload OK")
         
-        C.write_op_to_json(itemList)  
+        C.write_op_to_json(itemList, C.convert_UTC_to_India_zone(currentTime))  
         print("json dump at output/output.json")    
         return      
       
