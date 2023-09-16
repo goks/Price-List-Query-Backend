@@ -123,7 +123,7 @@ class MainWindow(QObject):
         currentTime = datetime.utcnow()
         print(C.convert_UTC_to_India_zone(currentTime))
         previousUpdateTimestamp = self.FB.get_latestServerUpdateTime()
-        itemList.prepareItemList( C.convert_UTC_to_India_zone(currentTime), C.convert_UTC_to_India_zone(previousUpdateTimestamp) )
+        itemList.prepareItemList( currentTime, C.convert_UTC_to_India_zone(previousUpdateTimestamp) )
         itemListdict = itemList.getItemList()
         imagePathsList = itemList.getImagePathstoUpload()
         logging.info("ItemList prepared. Ready to upload")
