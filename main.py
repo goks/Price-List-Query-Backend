@@ -11,37 +11,95 @@ import core
 IST = pytz.timezone("Asia/Calcutta")
 
 class MainWindow(QObject):
+    progressChanged = Signal(int, int)
+
     def __init__(self):
         super().__init__()
         self._status = "Ready"
         self._lastUpdated = "Never"
         self.threadpool = QThreadPool()
+        self._logs = []
         self.loadLastUpdated()
+        self.progress = 0
 
     def loadLastUpdated(self):
         try:
             ts = core.firestore_db.collection("DB_Service").document("serverSideData").get().to_dict().get("latestImportFromServer", None)
-            if ts:
+
+            if isinstance(ts, datetime):
+                dt = ts.astimezone(IST)
+            elif isinstance(ts, str):
+                dt = datetime.fromisoformat(ts).replace(tzinfo=pytz.utc).astimezone(IST)
+            elif isinstance(ts, (int, float)):
                 dt = datetime.utcfromtimestamp(ts / 1000).replace(tzinfo=pytz.utc).astimezone(IST)
+            else:
+                dt = None
+
+            if dt:
                 self._lastUpdated = dt.strftime("%d-%m-%Y %H:%M")
-        except:
+            else:
+                self._lastUpdated = "Unknown"
+        except Exception as e:
+            print("Error in loadLastUpdated:", e)
             self._lastUpdated = "Unknown"
+
+    @Slot()
+    def clearAndUploadAll(self):
+        self._status = "Clearing and uploading..."
+        self.statusChanged.emit()
+
+        # Reset logs and progress
+        self._logs = []
+        self.logChanged.emit()
+        self.progressChanged.emit(0, 1)
+
+        # Start threaded work
+        worker = Worker(self.performClearAndUpload)
+        self.threadpool.start(worker)
+
+    def performClearAndUpload(self):
+        try:
+            def log(msg):
+                print(msg)
+                self._logs.append(msg)
+                self.logChanged.emit()
+
+            def on_progress(done, total):
+                self.progressChanged.emit(done, total if total > 0 else 1)
+
+            item_count, image_count, now, _ = core.clear_and_full_upload(
+                log_func=log,
+                on_progress=on_progress
+            )
+
+            dt = now.replace(tzinfo=pytz.utc).astimezone(IST)
+            self._status = f"✅ Uploaded {item_count} items"
+            self._lastUpdated = dt.strftime("%d-%m-%Y %H:%M")
+
+        except Exception as e:
+            traceback.print_exc()
+            self._status = f"❌ Error: {str(e)}"
+            self._logs.append(str(e))
+            self.logChanged.emit()
+        finally:
+            self.statusChanged.emit()
+            self.lastUpdatedChanged.emit()
+            self.logChanged.emit()
 
     @Signal
     def statusChanged(self): pass
     def getStatus(self): return self._status
+    status = Property(str, getStatus, notify=statusChanged)
 
     @Signal
     def lastUpdatedChanged(self): pass
     def getLastUpdated(self): return self._lastUpdated
-    
+    lastUpdated = Property(str, getLastUpdated, notify=lastUpdatedChanged)
+
     @Signal
     def logChanged(self): pass
     def getLogs(self): return "\n".join(self._logs)
     logs = Property(str, getLogs, notify=logChanged)
-
-    status = Property(str, getStatus, notify=statusChanged)
-    lastUpdated = Property(str, getLastUpdated, notify=lastUpdatedChanged)
 
     @Slot()
     def upload(self):
@@ -57,13 +115,15 @@ class MainWindow(QObject):
             self._status = f"Success: {item_count} items, {image_count} images"
             self._lastUpdated = dt.strftime("%d-%m-%Y %H:%M")
             self._logs = logs
-            self.logChanged.emit()
         except Exception as e:
             traceback.print_exc()
             self._status = f"Error: {str(e)}"
+            self._logs.append(str(e))
         finally:
             self.statusChanged.emit()
             self.lastUpdatedChanged.emit()
+            self.logChanged.emit()
+
 
 class Worker(QRunnable):
     def __init__(self, fn):
@@ -76,10 +136,10 @@ class Worker(QRunnable):
 if __name__ == "__main__":
     app = QGuiApplication(sys.argv)
     engine = QQmlApplicationEngine()
-    engine.load(Path("GUI/main.qml").as_posix())
-
     win = MainWindow()
     engine.rootContext().setContextProperty("backend", win)
+    win.progressChanged.connect(lambda value: engine.rootObjects()[0].setProperty("uploadProgress", value))
+    engine.load(Path("GUI/main.qml").as_posix())
 
     if not engine.rootObjects():
         sys.exit(-1)
