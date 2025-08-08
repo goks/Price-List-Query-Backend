@@ -22,6 +22,22 @@ class MainWindow(QObject):
         self.loadLastUpdated()
         self.progress = 0
 
+    @Slot()
+    def checkDbConnection(self):
+        self._status = "Checking database connection..."
+        self.statusChanged.emit()
+        try:
+            if hasattr(core, "connect_to_sql"):
+                conn = core.connect_to_sql()
+                conn.close()
+            self._logs.append("✅ Database connection successful.")
+            self._status = "✅ Database connection successful."
+        except Exception as e:
+            self._status = "❌ Cannot connect to database."
+            self._logs.append(f"❌ Database connection failed: {str(e)}")
+        self.statusChanged.emit()
+        self.logChanged.emit()
+
     def loadLastUpdated(self):
         try:
             ts = core.firestore_db.collection("DB_Service").document("serverSideData").get().to_dict().get("latestImportFromServer", None)
@@ -143,4 +159,12 @@ if __name__ == "__main__":
 
     if not engine.rootObjects():
         sys.exit(-1)
+
+    # After the UI is loaded and event loop starts, check DB connection
+    from PySide2.QtCore import QTimer, QCoreApplication
+    def delayed_check():
+        QCoreApplication.instance().processEvents()  # flush UI events
+        win.checkDbConnection()
+    QTimer.singleShot(500, delayed_check)  # 500ms to ensure UI is visible
+
     sys.exit(app.exec_())

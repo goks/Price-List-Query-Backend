@@ -1,13 +1,19 @@
 import QtQuick 2.15
 import QtQuick.Window 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Dialogs 1.3
+import QtGraphicalEffects 1.15
 
 Window {
     id: window
-    width: 760
-    height: 600
+    width: 780
+    height: 640
     visible: true
-    title: "Gokul Agencies Price Updater"
+    title: "GA Price Uploader"
+
+    property int currentValue: 0
+    property int maxValue: 1
 
     FontLoader { id: poppinsRegular; source: "../fonts/Poppins-Regular.ttf" }
     FontLoader { id: poppinsSemiBold; source: "../fonts/Poppins-SemiBold.ttf" }
@@ -26,49 +32,73 @@ Window {
         visible: backend.status === "Uploading..."
         z: 2
 
-        BusyIndicator {
-            anchors.centerIn: parent
-            running: true
-        }
+        // BusyIndicator {
+        //     anchors.centerIn: parent
+        //     running: true
+        // }
     }
 
-    Column {
+    ColumnLayout {
         anchors.centerIn: parent
-        spacing: 20
+        spacing: 16
+        width: 640
 
-        Text {
-            text: "Gokul Agencies - Staff App"
-            font.pixelSize: 28
-            font.bold: true
-            font.family: poppinsSemiBold.name
-            color: "white"
-            horizontalAlignment: Text.AlignHCenter
-            anchors.horizontalCenter: parent.horizontalCenter
+        Rectangle {
+            width: parent.width
+            height: 120
+            radius: 12
+            color: "#00000080"
+            border.color: "white"
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 4
+
+                Text {
+                    text: "Gokul Agencies - Staff App"
+                    font.pixelSize: 26
+                    font.family: poppinsSemiBold.name
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                    id: lastUpdatedText
+                    text: "Last updated: " + backend.lastUpdated
+                    color: "lightgray"
+                    font.pixelSize: 16
+                    font.family: poppinsRegular.name
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
         }
 
-        Text {
-            id: lastUpdatedText
-            text: "Last updated: " + backend.lastUpdated
-            color: "lightgray"
-            font.pixelSize: 16
-            font.family: poppinsRegular.name
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
+        RowLayout {
+            spacing: 12
+            Layout.alignment: Qt.AlignHCenter
 
-        Button {
-            id: updateButton
-            text: "Update Price List"
-            enabled: backend.status !== "Uploading..."
-            anchors.horizontalCenter: parent.horizontalCenter
-            onClicked: backend.upload()
+            Button {
+                id: updateButton
+                text: "Update Price List"
+                enabled: backend.status !== "Uploading..."
+                onClicked: backend.upload()
+            }
+
+            Button {
+                text: "Clear & Re-upload"
+                onClicked: confirmDialog.open()
+                enabled: backend.status !== "Uploading..."
+            }
         }
 
         ProgressBar {
             id: progressBar
-            visible: backend.status === "Uploading..."
-            indeterminate: true
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: 200
+            visible: backend.status.includes("upload")
+            Layout.alignment: Qt.AlignHCenter
+            Layout.preferredWidth: 240
+            from: 0
+            to: maxValue
+            value: currentValue
         }
 
         Text {
@@ -78,19 +108,19 @@ Window {
             font.pixelSize: 16
             font.family: poppinsRegular.name
             opacity: backend.status !== "Ready" ? 1 : 0
-            anchors.horizontalCenter: parent.horizontalCenter
+            Layout.alignment: Qt.AlignHCenter
 
             Behavior on opacity {
-                NumberAnimation { duration: 500 }
+                NumberAnimation { duration: 400 }
             }
         }
+
         Rectangle {
-            width: 600
-            height: 200
-            color: "#00000070"
+            width: parent.width
+            height: 240
             radius: 10
+            color: "#00000070"
             border.color: "white"
-            anchors.horizontalCenter: parent.horizontalCenter
 
             ScrollView {
                 anchors.fill: parent
@@ -99,19 +129,36 @@ Window {
                     readOnly: true
                     wrapMode: TextEdit.Wrap
                     font.pixelSize: 14
+                    font.family: poppinsRegular.name
                     color: "#EEEEEE"
                     background: null
                 }
             }
         }
+
+        Item { Layout.fillHeight: true }
+
+        Text {
+            text: "\u00A9 Neo Productions 2025"
+            color: "#DDDDDD"
+            font.pixelSize: 12
+            Layout.alignment: Qt.AlignHCenter
+        }
     }
 
-    Text {
-        text: "\u00A9 Neo Productions 2025"
-        color: "#DDDDDD"
-        font.pixelSize: 12
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 10
+    MessageDialog {
+        id: confirmDialog
+        title: "Confirm"
+        text: "This will delete all Firestore data and re-upload fresh. Continue?"
+        standardButtons: StandardButton.Yes | StandardButton.No
+        onYes: backend.clearAndUploadAll()
     }
+    
+    Connections {
+    target: backend
+    onProgressChanged: (done, total) => {
+        currentValue = done
+        maxValue = total
+    }
+}
 }
