@@ -6,6 +6,7 @@ import hashlib
 import datetime
 import logging
 import pyodbc
+import json
 from PIL import Image
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
@@ -28,7 +29,7 @@ if not firebase_admin._apps:
 firestore_db = firestore.client()
 
 # --- SQL Constants ---
-SERVERNAME = "GASERVER\BUSYSTDSQL"
+SERVERNAME = r"GASERVER\BUSYSTDSQL"
 DATABASENAME = "BusyComp0004_db12025"
 
 # --- Firestore Meta Fields ---
@@ -91,7 +92,7 @@ def upload_active_ids_to_firestore(active_ids: set):
     active_ids_array = sorted(list(active_ids))  # Optional: sorted for readability
     ACTIVE_IDS_DOC.set({
         "activeMasterCodes": active_ids_array,
-        "updatedAt": firestore.SERVER_TIMESTAMP
+        "updatedAt": datetime.datetime.utcnow().isoformat()
     }, merge=True)
 
 def build_item(row, units, groups, timestamp):
@@ -294,7 +295,7 @@ def clear_and_full_upload(log_func=print, on_progress=None):
     log(f"🕓 Completed at {now} UTC")
 
     summary = f"✅ Uploaded {total_items} items | 🖼️ {updated_images} images"
-    log(summary)
+    log(summary) 
 
     return total_items, updated_images, now, logs
 
@@ -303,6 +304,48 @@ def clear_and_full_upload(log_func=print, on_progress=None):
 def run_sync():
     global log_output
     log_output.clear()
+    # Check for existing stock snapshot and compare stock changes
+    snapshot_file = "last_stock_snapshot.json"
+    # Load previous snapshot or create in-memory if missing
+    if os.path.exists(snapshot_file):
+        try:
+            with open(snapshot_file, "r", encoding="utf-8") as f:
+                prev_snapshot = json.load(f)
+        except Exception:
+            prev_snapshot = fetch_item_stocks_details()
+    else:
+        log_output.append("📊 Stock snapshot not found, creating initial in-memory snapshot...")
+        prev_snapshot = fetch_item_stocks_details()
+    # Fetch current snapshot in-memory
+    current_snapshot = fetch_item_stocks_details()
+    # Compare previous and current stocks
+    prev_map = {item['MasterCode']: item['Stock'] for item in prev_snapshot}
+    changes = []
+    for item in current_snapshot:
+        code = item['MasterCode']
+        name = item.get('Name', '')
+        curr = item['Stock']
+        prev = prev_map.get(code, 0)
+        delta = curr - prev
+        # only record items with stock increase >=10 and positive final stock
+        if delta >= 10 and curr > 0:
+            changes.append((code, name, prev, curr, delta))
+    log_output.append(f"📊 Significant stock increases (>=10): {len(changes)} items")
+    for code, name, prev, curr, delta in changes:
+        log_output.append(f" - {code} ({name}): {prev} -> {curr} (Δ{delta})")
+    # Publish changes to Firestore for app consumption
+    try:
+        stock_changes_doc = firestore_db.collection("DB_Service").document("stock_changes_snapshot")
+        stock_changes_doc.set({
+            "changes": [
+                {"MasterCode": code, "Name": name, "prevStock": prev, "currStock": curr, "delta": delta}
+                for code, name, prev, curr, delta in changes
+            ],
+            "updatedAt": datetime.datetime.utcnow().isoformat()
+        })
+        log_output.append("📢 Published stock changes to Firestore.")
+    except Exception as e:
+        log_output.append(f"❌ Failed to publish stock changes: {e}")
     now = datetime.datetime.utcnow()
 
     # Get previous timestamp from Firestore meta
@@ -424,7 +467,83 @@ def run_sync():
     summary = f"✅ Uploaded {len(items)} items | 🖼️ {len(updated_images)} images updated"
     log_output.append(summary)
     logging.info(summary)
-
+    # Save updated stock snapshot after successful upload
+    try:
+        save_stock_snapshot(current_snapshot, snapshot_file)
+        log_output.append(f"📊 Saved new stock snapshot to '{snapshot_file}'")
+    except Exception as e:
+        log_output.append(f"❌ Failed to save stock snapshot: {e}")
     return len(items), len(updated_images), now, log_output
 
+# Utility function to save stock data locally as JSON
+def save_stock_snapshot(stock_dict, filename="last_stock_snapshot.json"):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(stock_dict, f, indent=2)
+# Fetch all item stocks with details and save locally
+def fetch_and_save_all_item_stocks_with_details(filename="last_stock_snapshot.json"):
+    """
+    Fetch stock and details for all items, save to JSON, and return the list.
+    Returns a list of dicts: [{MasterCode, Name, Alias, Stock, ...}, ...]
+    """
+    conn = connect_to_sql()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT 
+            F.MasterCode,
+            M.Name,
+            M.Alias,
+            SUM(
+                F.D1 
+                + ISNULL(F.D23,0) + ISNULL(F.D24,0) + ISNULL(F.D25,0) + ISNULL(F.D26,0) + ISNULL(F.D27,0) + ISNULL(F.D28,0) + ISNULL(F.D29,0) + ISNULL(F.D30,0) + ISNULL(F.D31,0) + ISNULL(F.D32,0) + ISNULL(F.D33,0)
+                - ISNULL(F.D11,0) - ISNULL(F.D12,0) - ISNULL(F.D13,0) - ISNULL(F.D14,0) - ISNULL(F.D15,0) - ISNULL(F.D16,0) - ISNULL(F.D17,0) - ISNULL(F.D18,0) - ISNULL(F.D19,0) - ISNULL(F.D20,0) - ISNULL(F.D21,0)
+            ) AS Stock
+        FROM dbo.Folio1 F
+        JOIN Master1 M ON F.MasterCode = M.Code
+        WHERE M.MasterType = 6 AND M.DeactiveMaster = 0 AND M.BlockedMaster = 0
+        GROUP BY F.MasterCode, M.Name, M.Alias
+    ''')
+    results = []
+    for row in cur.fetchall():
+        results.append({
+            "MasterCode": row.MasterCode,
+            "Name": row.Name,
+            "Alias": row.Alias,
+            "Stock": float(row.Stock)
+        })
+    conn.close()
+    # Save to JSON
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    return results
+
+# New helper to fetch stocks without writing file
+def fetch_item_stocks_details():
+    """Fetch stock details for all active items without saving to file."""
+    conn = connect_to_sql()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT 
+            F.MasterCode,
+            M.Name,
+            M.Alias,
+            SUM(
+                F.D1 + ISNULL(F.D23,0) + ISNULL(F.D24,0) + ISNULL(F.D25,0) + ISNULL(F.D26,0) + ISNULL(F.D27,0) + ISNULL(F.D28,0) + ISNULL(F.D29,0) + ISNULL(F.D30,0) + ISNULL(F.D31,0) + ISNULL(F.D32,0) + ISNULL(F.D33,0)
+                - ISNULL(F.D11,0) - ISNULL(F.D12,0) - ISNULL(F.D13,0) - ISNULL(F.D14,0) - ISNULL(F.D15,0) - ISNULL(F.D16,0) - ISNULL(F.D17,0) - ISNULL(F.D18,0) - ISNULL(F.D19,0) - ISNULL(F.D20,0) - ISNULL(F.D21,0)
+            ) AS Stock
+        FROM dbo.Folio1 F
+        JOIN Master1 M ON F.MasterCode = M.Code
+        WHERE M.MasterType = 6 AND M.DeactiveMaster = 0 AND M.BlockedMaster = 0
+        GROUP BY F.MasterCode, M.Name, M.Alias
+    ''')
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        result.append({
+            "MasterCode": row.MasterCode,
+            "Name": row.Name,
+            "Alias": row.Alias,
+            "Stock": float(row.Stock)
+        })
+    return result
 
