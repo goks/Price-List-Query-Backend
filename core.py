@@ -304,6 +304,8 @@ def clear_and_full_upload(log_func=print, on_progress=None):
 def run_sync():
     global log_output
     log_output.clear()
+    # Local cache filename for Firestore IDs
+    local_ids_file = "last_firestore_ids.json"
     # Check for existing stock snapshot and compare stock changes
     snapshot_file = "last_stock_snapshot.json"
     # Load previous snapshot or create in-memory if missing
@@ -408,7 +410,14 @@ def run_sync():
 
     # --- Identify and delete Firestore docs no longer in SQL ---
     active_sql_ids = get_all_ids()
-    existing_firestore_ids = get_firestore_item_ids()
+    # Load existing Firestore IDs from local cache or fetch from server
+    local_ids_file = "last_firestore_ids.json"
+    if os.path.exists(local_ids_file):
+        existing_firestore_ids = load_local_firestore_ids(local_ids_file)
+    else:
+        # First-time fetch from Firestore and cache locally
+        existing_firestore_ids = get_firestore_item_ids()
+        save_local_firestore_ids(existing_firestore_ids, local_ids_file)
 
     existing_firestore_ids = set(str(id) for id in existing_firestore_ids)
     active_sql_ids = set(str(id) for id in active_sql_ids)
@@ -467,6 +476,9 @@ def run_sync():
     summary = f"✅ Uploaded {len(items)} items | 🖼️ {len(updated_images)} images updated"
     log_output.append(summary)
     logging.info(summary)
+    # Cache the updated Firestore IDs locally
+    save_local_firestore_ids(active_sql_ids, local_ids_file)
+    log_output.append(f"💾 Cached Firestore IDs to '{local_ids_file}'")
     # Save updated stock snapshot after successful upload
     try:
         save_stock_snapshot(current_snapshot, snapshot_file)
@@ -474,6 +486,22 @@ def run_sync():
     except Exception as e:
         log_output.append(f"❌ Failed to save stock snapshot: {e}")
     return len(items), len(updated_images), now, log_output
+
+# Local cache for Firestore IDs
+def load_local_firestore_ids(filename="last_firestore_ids.json"):
+    if os.path.exists(filename):
+        try:
+            return set(json.load(open(filename, "r", encoding="utf-8")))
+        except Exception:
+            return set()
+    return set()
+
+def save_local_firestore_ids(ids: set, filename="last_firestore_ids.json"):
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(sorted(list(ids)), f)
+    except Exception:
+        pass
 
 # Utility function to save stock data locally as JSON
 def save_stock_snapshot(stock_dict, filename="last_stock_snapshot.json"):
