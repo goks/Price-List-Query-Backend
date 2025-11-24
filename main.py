@@ -1,14 +1,18 @@
 import sys
 from pathlib import Path
-from PySide2.QtGui import QGuiApplication, QIcon
+from PySide2.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
+from PySide2.QtGui import QIcon
 from PySide2.QtQml import QQmlApplicationEngine
-from PySide2.QtCore import QObject, Signal, Property, Slot, QRunnable, QThreadPool
+from PySide2.QtCore import QObject, Signal, Property, Slot, QRunnable, QThreadPool, QTimer
 from datetime import datetime
 import pytz
 import traceback
+import json
+import os
 import core
 
 IST = pytz.timezone("Asia/Calcutta")
+SETTINGS_FILE = "auto_update_settings.json"
 
 class MainWindow(QObject):
     progressChanged = Signal(int, int)
@@ -19,9 +23,63 @@ class MainWindow(QObject):
         self._lastUpdated = "Never"
         self.threadpool = QThreadPool()
         self._logs = []
-        self.loadLastUpdated()
         self.progress = 0
+        
+        # Auto-update settings
+        self._autoUpdateEnabled = False
+        self._autoUpdateInterval = 15  # minutes
+        self.loadSettings()
+        
+        # Auto-update timer
+        self.autoUpdateTimer = QTimer()
+        self.autoUpdateTimer.timeout.connect(self.onAutoUpdateTrigger)
+        if self._autoUpdateEnabled:
+            self.startAutoUpdate()
 
+    def loadSettings(self):
+        """Load auto-update settings from file"""
+        try:
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, 'r') as f:
+                    settings = json.load(f)
+                    self._autoUpdateEnabled = settings.get('enabled', False)
+                    self._autoUpdateInterval = settings.get('interval', 15)
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+    
+    def saveSettings(self):
+        """Save auto-update settings to file"""
+        try:
+            settings = {
+                'enabled': self._autoUpdateEnabled,
+                'interval': self._autoUpdateInterval
+            }
+            with open(SETTINGS_FILE, 'w') as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+    
+    def startAutoUpdate(self):
+        """Start the auto-update timer"""
+        if self._autoUpdateInterval > 0:
+            interval_ms = self._autoUpdateInterval * 60 * 1000  # Convert minutes to milliseconds
+            self.autoUpdateTimer.start(interval_ms)
+            self._logs.append(f"⏰ Auto-update enabled: every {self._autoUpdateInterval} minutes")
+            self.logChanged.emit()
+    
+    def stopAutoUpdate(self):
+        """Stop the auto-update timer"""
+        self.autoUpdateTimer.stop()
+        self._logs.append("⏰ Auto-update disabled")
+        self.logChanged.emit()
+    
+    @Slot()
+    def onAutoUpdateTrigger(self):
+        """Called when auto-update timer triggers"""
+        self._logs.append(f"⏰ Auto-update triggered at {datetime.now(IST).strftime('%d-%m-%Y %H:%M')}")
+        self.logChanged.emit()
+        self.upload()
+    
     @Slot()
     def checkDbConnection(self):
         self._status = "Checking database connection..."
@@ -116,6 +174,95 @@ class MainWindow(QObject):
     def logChanged(self): pass
     def getLogs(self): return "\n".join(self._logs)
     logs = Property(str, getLogs, notify=logChanged)
+    
+    @Signal
+    def autoUpdateEnabledChanged(self): pass
+    def getAutoUpdateEnabled(self): return self._autoUpdateEnabled
+    def setAutoUpdateEnabled(self, enabled):
+        if self._autoUpdateEnabled != enabled:
+            self._autoUpdateEnabled = enabled
+            self.saveSettings()
+            if enabled:
+                self.startAutoUpdate()
+            else:
+                self.stopAutoUpdate()
+            self.autoUpdateEnabledChanged.emit()
+    autoUpdateEnabled = Property(bool, getAutoUpdateEnabled, setAutoUpdateEnabled, notify=autoUpdateEnabledChanged)
+    
+    @Signal
+    def autoUpdateIntervalChanged(self): pass
+    def getAutoUpdateInterval(self): return self._autoUpdateInterval
+    def setAutoUpdateInterval(self, interval):
+        if self._autoUpdateInterval != interval and interval > 0:
+            self._autoUpdateInterval = interval
+            self.saveSettings()
+            if self._autoUpdateEnabled:
+                # Restart timer with new interval
+                self.stopAutoUpdate()
+                self.startAutoUpdate()
+            self.autoUpdateIntervalChanged.emit()
+    autoUpdateInterval = Property(int, getAutoUpdateInterval, setAutoUpdateInterval, notify=autoUpdateIntervalChanged)
+    
+    @Slot()
+    def showWindow(self):
+        """Show the main window"""
+        if hasattr(self, 'qmlWindow') and self.qmlWindow:
+            self.qmlWindow.show()
+            self.qmlWindow.raise_()
+            self.qmlWindow.requestActivate()
+    
+    @Slot()
+    def hideWindow(self):
+        """Hide the main window"""
+        if hasattr(self, 'qmlWindow') and self.qmlWindow:
+            self.qmlWindow.hide()
+    
+    @Slot()
+    def toggleWindow(self):
+        """Toggle window visibility"""
+        if hasattr(self, 'qmlWindow') and self.qmlWindow:
+            if self.qmlWindow.isVisible():
+                self.hideWindow()
+            else:
+                self.showWindow()
+    
+    def setupTrayIcon(self, app):
+        """Setup system tray icon with context menu"""
+        self.trayIcon = QSystemTrayIcon(app)
+        
+        # Try to set icon, fallback to default if not found
+        icon_path = os.path.join(os.path.dirname(__file__), "icons", "app_icon.png")
+        if os.path.exists(icon_path):
+            self.trayIcon.setIcon(QIcon(icon_path))
+        else:
+            self.trayIcon.setIcon(app.style().standardIcon(app.style().SP_ComputerIcon))
+        
+        # Create context menu
+        tray_menu = QMenu()
+        
+        show_action = QAction("Show", app)
+        show_action.triggered.connect(self.showWindow)
+        tray_menu.addAction(show_action)
+        
+        sync_action = QAction("Sync Now", app)
+        sync_action.triggered.connect(self.upload)
+        tray_menu.addAction(sync_action)
+        
+        tray_menu.addSeparator()
+        
+        quit_action = QAction("Quit", app)
+        quit_action.triggered.connect(app.quit)
+        tray_menu.addAction(quit_action)
+        
+        self.trayIcon.setContextMenu(tray_menu)
+        self.trayIcon.activated.connect(self.onTrayIconActivated)
+        self.trayIcon.setToolTip("GA Price Uploader")
+        self.trayIcon.show()
+    
+    def onTrayIconActivated(self, reason):
+        """Handle tray icon activation"""
+        if reason == QSystemTrayIcon.DoubleClick or reason == QSystemTrayIcon.Trigger:
+            self.toggleWindow()
 
     @Slot()
     def upload(self):
@@ -150,7 +297,9 @@ class Worker(QRunnable):
         self.fn()
 
 if __name__ == "__main__":
-    app = QGuiApplication(sys.argv)
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)  # Don't quit when window is hidden
+    
     engine = QQmlApplicationEngine()
     win = MainWindow()
     engine.rootContext().setContextProperty("backend", win)
@@ -159,11 +308,34 @@ if __name__ == "__main__":
 
     if not engine.rootObjects():
         sys.exit(-1)
+    
+    # Store reference to QML window
+    win.qmlWindow = engine.rootObjects()[0]
+    
+    # Setup system tray
+    win.setupTrayIcon(app)
+    
+    # Track visibility state to show notification only when actually minimizing
+    win._wasVisible = True
+    def on_visibility_changed():
+        is_visible = win.qmlWindow.isVisible()
+        # Show notification only when transitioning from visible to hidden
+        if win._wasVisible and not is_visible:
+            win.trayIcon.showMessage(
+                "GA Price Uploader", 
+                "App minimized to system tray",
+                QSystemTrayIcon.Information,
+                2000
+            )
+        win._wasVisible = is_visible
+    
+    win.qmlWindow.visibilityChanged.connect(on_visibility_changed)
 
     # After the UI is loaded and event loop starts, check DB connection
     from PySide2.QtCore import QTimer, QCoreApplication
     def delayed_check():
         QCoreApplication.instance().processEvents()  # flush UI events
+        win.loadLastUpdated()  # Load last updated timestamp
         win.checkDbConnection()
     QTimer.singleShot(500, delayed_check)  # 500ms to ensure UI is visible
 

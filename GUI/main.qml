@@ -15,6 +15,12 @@ Window {
     property int currentValue: 0
     property int maxValue: 1
 
+    // Handle window close event - minimize to tray instead
+    onClosing: {
+        close.accepted = false
+        window.hide()
+    }
+
     FontLoader { id: poppinsRegular; source: "../fonts/Poppins-Regular.ttf" }
     FontLoader { id: poppinsSemiBold; source: "../fonts/Poppins-SemiBold.ttf" }
 
@@ -88,6 +94,74 @@ Window {
                 text: "Clear & Re-upload"
                 onClicked: confirmDialog.open()
                 enabled: backend.status !== "Uploading..."
+            }
+        }
+
+        Rectangle {
+            width: parent.width
+            height: 100
+            radius: 12
+            color: "#00000080"
+            border.color: "white"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 20
+
+                Column {
+                    spacing: 8
+                    Layout.fillWidth: true
+
+                    RowLayout {
+                        spacing: 12
+
+                        Text {
+                            text: "⏰ Auto-Update:"
+                            color: "white"
+                            font.pixelSize: 16
+                            font.family: poppinsSemiBold.name
+                        }
+
+                        Switch {
+                            id: autoUpdateSwitch
+                            checked: backend.autoUpdateEnabled
+                            onToggled: backend.autoUpdateEnabled = checked
+                        }
+                    }
+
+                    RowLayout {
+                        spacing: 12
+                        enabled: backend.autoUpdateEnabled
+
+                        Text {
+                            text: "Interval (minutes):"
+                            color: backend.autoUpdateEnabled ? "white" : "#888888"
+                            font.pixelSize: 14
+                            font.family: poppinsRegular.name
+                        }
+
+                        SpinBox {
+                            id: intervalSpinBox
+                            from: 5
+                            to: 1440
+                            value: backend.autoUpdateInterval
+                            stepSize: 5
+                            editable: true
+                            onValueModified: backend.autoUpdateInterval = value
+                        }
+                    }
+                }
+
+                Text {
+                    text: backend.autoUpdateEnabled ? 
+                          "✓ Auto-sync every " + backend.autoUpdateInterval + " min" : 
+                          "Manual sync only"
+                    color: backend.autoUpdateEnabled ? "#4CAF50" : "#FFA726"
+                    font.pixelSize: 14
+                    font.family: poppinsRegular.name
+                    Layout.alignment: Qt.AlignVCenter
+                }
             }
         }
 
