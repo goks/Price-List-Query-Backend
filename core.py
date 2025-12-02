@@ -351,7 +351,8 @@ def run_sync():
     now = datetime.datetime.utcnow()
 
     # Get previous timestamp from Firestore meta
-    prev_str = META_DOC.get().to_dict().get("latestImportFromServer")
+    meta_dict = META_DOC.get().to_dict()
+    prev_str = meta_dict.get("latestImportFromServer") if meta_dict else None  # type: ignore
     if isinstance(prev_str, datetime.datetime):
         prev = prev_str
     elif isinstance(prev_str, str):

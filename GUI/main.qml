@@ -1,17 +1,16 @@
-import QtQuick 2.15
-import QtQuick.Window 2.15
-import QtQuick.Controls 2.15
-import QtQuick.Layouts 1.15
-import QtQuick.Dialogs 1.3
-import QtGraphicalEffects 1.15
+import QtQuick
+import QtQuick.Window
+import QtQuick.Controls
+import QtQuick.Layouts
+import Qt5Compat.GraphicalEffects
 
 Window {
     id: window
-    width: 780
-    height: 640
+    width: 600
+    height: 550
     visible: true
     title: "GA Price Uploader"
-
+    
     property int currentValue: 0
     property int maxValue: 1
 
@@ -21,14 +20,11 @@ Window {
         window.hide()
     }
 
-    FontLoader { id: poppinsRegular; source: "../fonts/Poppins-Regular.ttf" }
-    FontLoader { id: poppinsSemiBold; source: "../fonts/Poppins-SemiBold.ttf" }
-
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#6A11CB" }
-            GradientStop { position: 1.0; color: "#2575FC" }
+            GradientStop { position: 0.0; color: "#667eea" }
+            GradientStop { position: 1.0; color: "#764ba2" }
         }
     }
 
@@ -37,202 +33,294 @@ Window {
         color: "#00000090"
         visible: backend.status === "Uploading..."
         z: 2
-
-        // BusyIndicator {
-        //     anchors.centerIn: parent
-        //     running: true
-        // }
     }
 
     ColumnLayout {
-        anchors.centerIn: parent
-        spacing: 16
-        width: 640
+        anchors.fill: parent
+        anchors.margins: 20
+        spacing: 12
 
-        Rectangle {
-            width: parent.width
-            height: 120
-            radius: 12
-            color: "#00000080"
-            border.color: "white"
-
-            Column {
-                anchors.centerIn: parent
-                spacing: 4
-
-                Text {
-                    text: "Gokul Agencies - Staff App"
-                    font.pixelSize: 26
-                    font.family: poppinsSemiBold.name
-                    color: "white"
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                Text {
-                    id: lastUpdatedText
-                    text: "Last updated: " + backend.lastUpdated
-                    color: "lightgray"
-                    font.pixelSize: 16
-                    font.family: poppinsRegular.name
-                    horizontalAlignment: Text.AlignHCenter
-                }
-            }
+        // Header
+        Text {
+            text: "Gokul Agencies"
+            font.pixelSize: 22
+            font.family: "Poppins SemiBold"
+            color: "white"
+            Layout.alignment: Qt.AlignHCenter
         }
 
-        RowLayout {
-            spacing: 12
+        Text {
+            text: "Last: " + backend.lastUpdated
+            color: "#E0E0E0"
+            font.pixelSize: 12
+            font.family: "Poppins"
             Layout.alignment: Qt.AlignHCenter
+        }
+
+        // Main Actions
+        RowLayout {
+            spacing: 10
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: 8
 
             Button {
-                id: updateButton
-                text: "Update Price List"
+                text: "Update"
                 enabled: backend.status !== "Uploading..."
                 onClicked: backend.upload()
+                font.family: "Poppins"
+                implicitWidth: 100
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: parent.enabled ? "#5E35B1" : "#9575CD"
+                    radius: 4
+                }
             }
 
             Button {
                 text: "Clear & Re-upload"
                 onClicked: confirmDialog.open()
                 enabled: backend.status !== "Uploading..."
+                font.family: "Poppins"
+                contentItem: Text {
+                    text: parent.text
+                    font: parent.font
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: parent.enabled ? "#C62828" : "#E57373"
+                    radius: 4
+                }
             }
         }
 
+        // Settings Card
         Rectangle {
-            width: parent.width
-            height: 100
-            radius: 12
-            color: "#00000080"
-            border.color: "white"
+            Layout.fillWidth: true
+            height: 200
+            radius: 8
+            color: "#00000040"
 
-            RowLayout {
+            ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 16
-                spacing: 20
+                anchors.margins: 14
+                spacing: 10
 
-                Column {
-                    spacing: 8
+                // Auto-Update Row
+                RowLayout {
                     Layout.fillWidth: true
+                    spacing: 10
 
-                    RowLayout {
-                        spacing: 12
+                    Text {
+                        text: "⏰"
+                        font.pixelSize: 14
+                        color: "white"
+                    }
+                    Text {
+                        text: "Auto-Update"
+                        font.pixelSize: 13
+                        font.family: "Poppins"
+                        color: "white"
+                    }
+                    Switch {
+                        checked: backend.autoUpdateEnabled
+                        onToggled: backend.autoUpdateEnabled = checked
+                        scale: 0.8
+                    }
+                    Item { Layout.fillWidth: true }
+                    Text {
+                        text: backend.autoUpdateInterval + " hr"
+                        font.pixelSize: 11
+                        font.family: "Poppins"
+                        color: "#B0B0B0"
+                        visible: backend.autoUpdateEnabled
+                    }
+                    SpinBox {
+                        from: 1
+                        to: 24
+                        value: backend.autoUpdateInterval
+                        stepSize: 1
+                        editable: true
+                        onValueModified: backend.autoUpdateInterval = value
+                        enabled: backend.autoUpdateEnabled
+                        implicitWidth: 100
+                        font.pixelSize: 11
+                    }
+                }
 
-                        Text {
-                            text: "⏰ Auto-Update:"
-                            color: "white"
-                            font.pixelSize: 16
-                            font.family: poppinsSemiBold.name
-                        }
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#FFFFFF30" }
 
-                        Switch {
-                            id: autoUpdateSwitch
-                            checked: backend.autoUpdateEnabled
-                            onToggled: backend.autoUpdateEnabled = checked
-                        }
+                // Autostart Row
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Text {
+                        text: "🚀"
+                        font.pixelSize: 14
+                        color: "white"
+                    }
+                    Text {
+                        text: "Start on Boot"
+                        font.pixelSize: 13
+                        font.family: "Poppins"
+                        color: "white"
+                    }
+                    Switch {
+                        checked: backend.autostartEnabled
+                        onToggled: backend.autostartEnabled = checked
+                        scale: 0.8
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#FFFFFF30" }
+
+                // Database Settings
+                Text {
+                    text: "⚙️ Database"
+                    font.pixelSize: 12
+                    font.family: "Poppins"
+                    color: "#E0E0E0"
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Text {
+                        text: "Server:"
+                        color: "#B0B0B0"
+                        font.pixelSize: 11
+                        font.family: "Poppins"
+                        Layout.preferredWidth: 50
                     }
 
-                    RowLayout {
-                        spacing: 12
-                        enabled: backend.autoUpdateEnabled
-
-                        Text {
-                            text: "Interval (minutes):"
-                            color: backend.autoUpdateEnabled ? "white" : "#888888"
-                            font.pixelSize: 14
-                            font.family: poppinsRegular.name
-                        }
-
-                        SpinBox {
-                            id: intervalSpinBox
-                            from: 5
-                            to: 1440
-                            value: backend.autoUpdateInterval
-                            stepSize: 5
-                            editable: true
-                            onValueModified: backend.autoUpdateInterval = value
+                    TextField {
+                        text: backend.dbServer
+                        font.pixelSize: 10
+                        Layout.fillWidth: true
+                        onEditingFinished: backend.dbServer = text
+                        background: Rectangle {
+                            color: "#00000050"
+                            radius: 4
+                            border.color: "#FFFFFF20"
                         }
                     }
                 }
 
-                Text {
-                    text: backend.autoUpdateEnabled ? 
-                          "✓ Auto-sync every " + backend.autoUpdateInterval + " min" : 
-                          "Manual sync only"
-                    color: backend.autoUpdateEnabled ? "#4CAF50" : "#FFA726"
-                    font.pixelSize: 14
-                    font.family: poppinsRegular.name
-                    Layout.alignment: Qt.AlignVCenter
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Text {
+                        text: "Database:"
+                        color: "#B0B0B0"
+                        font.pixelSize: 11
+                        font.family: "Poppins"
+                        Layout.preferredWidth: 50
+                    }
+
+                    TextField {
+                        text: backend.dbName
+                        font.pixelSize: 10
+                        Layout.fillWidth: true
+                        onEditingFinished: backend.dbName = text
+                        background: Rectangle {
+                            color: "#00000050"
+                            radius: 4
+                            border.color: "#FFFFFF20"
+                        }
+                    }
                 }
             }
         }
 
+        // Status & Progress
         ProgressBar {
-            id: progressBar
             visible: backend.status.includes("upload")
-            Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: 240
+            Layout.fillWidth: true
             from: 0
             to: maxValue
             value: currentValue
         }
 
         Text {
-            id: statusText
             text: backend.status
             color: "white"
-            font.pixelSize: 16
-            font.family: poppinsRegular.name
+            font.pixelSize: 13
+            font.family: "Poppins"
             opacity: backend.status !== "Ready" ? 1 : 0
             Layout.alignment: Qt.AlignHCenter
-
-            Behavior on opacity {
-                NumberAnimation { duration: 400 }
-            }
+            Behavior on opacity { NumberAnimation { duration: 300 } }
         }
 
+        // Logs
         Rectangle {
-            width: parent.width
-            height: 240
-            radius: 10
-            color: "#00000070"
-            border.color: "white"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            radius: 8
+            color: "#00000040"
 
             ScrollView {
+                id: logScrollView
                 anchors.fill: parent
+                anchors.margins: 4
+                clip: true
+                
                 TextArea {
+                    id: logTextArea
                     text: backend.logs
                     readOnly: true
                     wrapMode: TextEdit.Wrap
-                    font.pixelSize: 14
-                    font.family: poppinsRegular.name
-                    color: "#EEEEEE"
+                    font.pixelSize: 11
+                    font.family: "Poppins"
+                    color: "#E0E0E0"
                     background: null
+                    
+                    onTextChanged: {
+                        logScrollView.ScrollBar.vertical.position = 1.0 - logScrollView.ScrollBar.vertical.size
+                    }
                 }
             }
         }
 
-        Item { Layout.fillHeight: true }
-
+        // Footer
         Text {
-            text: "\u00A9 Neo Productions 2025"
-            color: "#DDDDDD"
-            font.pixelSize: 12
+            text: "© Neo Productions 2025"
+            color: "#C0C0C0"
+            font.pixelSize: 10
+            font.family: "Poppins"
             Layout.alignment: Qt.AlignHCenter
         }
     }
 
-    MessageDialog {
+    Dialog {
         id: confirmDialog
         title: "Confirm"
-        text: "This will delete all Firestore data and re-upload fresh. Continue?"
-        standardButtons: StandardButton.Yes | StandardButton.No
-        onYes: backend.clearAndUploadAll()
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: Dialog.Yes | Dialog.No
+        
+        Label {
+            text: "This will delete all Firestore data and re-upload fresh. Continue?"
+        }
+        
+        onAccepted: backend.clearAndUploadAll()
     }
     
     Connections {
-    target: backend
-    onProgressChanged: (done, total) => {
-        currentValue = done
-        maxValue = total
+        target: backend
+        function onProgressChanged(done, total) {
+            currentValue = done
+            maxValue = total
+        }
     }
-}
 }
