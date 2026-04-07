@@ -31,6 +31,7 @@ firestore_db = firestore.client()
 # --- SQL Constants ---
 SERVERNAME = r"GASERVER\BUSYSTDSQL"
 DATABASENAME = "BusyComp0004_db12025"
+SQL_CONNECTION_TIMEOUT = 5
 
 # --- Firestore Meta Fields ---
 META_DOC = firestore_db.collection("DB_Service").document("serverSideData")
@@ -42,8 +43,14 @@ log_output = []
 
 # --- SQL helpers ---
 def connect_to_sql():
-    conn_str = f"Driver={{SQL Server}};Server={SERVERNAME};Database={DATABASENAME};Trusted_Connection=yes;"
-    return pyodbc.connect(conn_str)
+    conn_str = (
+        f"Driver={{SQL Server}};"
+        f"Server={SERVERNAME};"
+        f"Database={DATABASENAME};"
+        "Trusted_Connection=yes;"
+        f"Connection Timeout={SQL_CONNECTION_TIMEOUT};"
+    )
+    return pyodbc.connect(conn_str, timeout=SQL_CONNECTION_TIMEOUT)
 
 def fetch_units(cursor):
     cursor.execute("SELECT Code,Name FROM Master1 WHERE MasterType=8 AND DeactiveMaster=0")

@@ -1,5 +1,5 @@
 !define APPNAME "Price List Update"
-!define COMPANYNAME "GA Agencies"
+!define COMPANYNAME "Neo Productions"
 !define DESCRIPTION "Price List Updater Application"
 !define VERSIONMAJOR 1
 !define VERSIONMINOR 0
@@ -10,7 +10,7 @@
 !define INSTALLSIZE 26000
 
 RequestExecutionLevel admin
-InstallDir "$PROGRAMFILES\${APPNAME}"
+InstallDir "$PROGRAMFILES\${COMPANYNAME}\${APPNAME}"
 Name "${APPNAME}"
 outFile "${APPNAME}-installer.exe"
 
@@ -125,8 +125,7 @@ section "install"
     DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "GA_Price_Uploader"
     DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${APPNAME}"
     
-    # Registry for autostart (create fresh entry)
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APPNAME}" "$INSTDIR\Price List Update.exe"
+    # Autostart is managed by the app setting itself. Do not force-enable it during install.
 
     # Uninstaller
     writeUninstaller "$INSTDIR\uninstall.exe"

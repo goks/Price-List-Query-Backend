@@ -1,0 +1,5 @@
+firebase-admin
+Pillow
+pyodbc
+PySide6
+pytz
