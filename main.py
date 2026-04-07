@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import ssl
 import sys
 import tempfile
 import traceback
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pytz
+import certifi
 from PySide6.QtCore import QObject, Property, QRunnable, QStandardPaths, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QFontDatabase, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
@@ -65,12 +67,14 @@ def load_latest_release() -> dict[str, Any]:
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=20, context=get_ssl_context()) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             raise RuntimeError("No GitHub release is published yet for this repository.") from exc
         raise
+    except ssl.SSLError as exc:
+        raise RuntimeError("SSL certificate verification failed while contacting GitHub. Check system date/time, proxy, or CA certificates.") from exc
 
 
 def choose_release_asset(assets: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
@@ -84,6 +88,10 @@ def choose_release_asset(assets: list[dict[str, Any]]) -> Optional[dict[str, Any
             str(asset.get("name", "")).lower(),
         ),
     )[0]
+
+
+def get_ssl_context() -> ssl.SSLContext:
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def get_pythonw_path() -> str:
@@ -561,7 +569,7 @@ class MainWindow(QObject):
                 download_url,
                 headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"},
             )
-            with urllib.request.urlopen(request, timeout=60) as response, open(target_path, "wb") as output_file:
+            with urllib.request.urlopen(request, timeout=60, context=get_ssl_context()) as response, open(target_path, "wb") as output_file:
                 output_file.write(response.read())
 
             self.setUpdateState(
