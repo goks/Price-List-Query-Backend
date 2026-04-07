@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   bump:
@@ -59,3 +60,11 @@ jobs:
           git tag "v$VERSION"
           git push origin "HEAD:$BRANCH_NAME"
           git push origin "v$VERSION"
+
+      - name: Trigger Windows release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          gh workflow run "build-release.yml" --ref "$BRANCH_NAME" -f release_tag="v$VERSION"

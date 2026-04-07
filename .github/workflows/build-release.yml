@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Tag to build and publish, e.g. v1.2.3
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -17,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -66,9 +73,10 @@ jobs:
             Price List Update-installer.exe
 
       - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
             dist/Price List Update.exe
             Price List Update-installer.exe
