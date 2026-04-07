@@ -670,6 +670,24 @@ Window {
                                 onToggled: backend.autostartEnabled = checked
                             }
                         }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: 14
+                            color: "#EAF0E1"
+                            implicitHeight: 52
+
+                            Text {
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                text: "Startup on boot will launch minimized to tray."
+                                wrapMode: Text.WordWrap
+                                font.pixelSize: 11
+                                font.family: "Poppins"
+                                color: "#46616B"
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
                     }
                 }
 

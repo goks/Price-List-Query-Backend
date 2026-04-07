@@ -30,6 +30,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
+      - name: Restore Firebase service account
+        shell: powershell
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FIREBASE_SERVICE_ACCOUNT_JSON)) {
+            throw "Missing GitHub secret FIREBASE_SERVICE_ACCOUNT_JSON."
+          }
+          New-Item -ItemType Directory -Force -Path ".\service-account" | Out-Null
+          $target = ".\service-account\gokul-agencies-firebase-adminsdk-ti855-702f214fc5.json"
+          Set-Content -Path $target -Value $env:FIREBASE_SERVICE_ACCOUNT_JSON -Encoding utf8
+
       - name: Install NSIS
         shell: powershell
         run: choco install nsis -y --no-progress
