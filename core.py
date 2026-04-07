@@ -22,7 +22,9 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 # --- Firebase Init ---
 CERT_PATH = os.path.join(BASE_PATH, r"service-account\gokul-agencies-firebase-adminsdk-ti855-702f214fc5.json")
 if not firebase_admin._apps:
-    cred = credentials.Certificate(CERT_PATH)
+    with open(CERT_PATH, "r", encoding="utf-8-sig") as cert_file:
+        cert_data = json.load(cert_file)
+    cred = credentials.Certificate(cert_data)
     firebase_admin.initialize_app(cred, {
         'storageBucket': 'gokul-agencies.appspot.com'
     })

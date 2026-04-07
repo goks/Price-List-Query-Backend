@@ -40,7 +40,8 @@ jobs:
           }
           New-Item -ItemType Directory -Force -Path ".\service-account" | Out-Null
           $target = ".\service-account\gokul-agencies-firebase-adminsdk-ti855-702f214fc5.json"
-          Set-Content -Path $target -Value $env:FIREBASE_SERVICE_ACCOUNT_JSON -Encoding utf8
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($target, $env:FIREBASE_SERVICE_ACCOUNT_JSON, $utf8NoBom)
 
       - name: Install NSIS
         shell: powershell
