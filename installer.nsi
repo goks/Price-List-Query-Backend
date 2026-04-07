@@ -3,7 +3,7 @@
 !define DESCRIPTION "Price List Updater Application"
 !define VERSIONMAJOR 1
 !define VERSIONMINOR 1
-!define VERSIONBUILD 0
+!define VERSIONBUILD 1
 !define HELPURL "http://www.gaagencies.com"
 !define UPDATEURL "http://www.gaagencies.com"
 !define ABOUTURL "http://www.gaagencies.com"
