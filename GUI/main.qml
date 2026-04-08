@@ -783,10 +783,19 @@ Window {
                         color: "#F7F3E9"
                     }
 
-                    ScrollView {
+                    Flickable {
+                        id: logFlick
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickableDirection: Flickable.VerticalFlick
+                        contentWidth: width
+                        contentHeight: Math.max(height, logText.implicitHeight)
+
+                        function scrollToBottom() {
+                            contentY = Math.max(0, contentHeight - height)
+                        }
 
                         ScrollBar.vertical: ScrollBar {
                             policy: ScrollBar.AsNeeded
@@ -805,16 +814,20 @@ Window {
                             }
                         }
 
-                        TextArea {
-                            id: logTextArea
+                        Text {
+                            id: logText
+                            width: logFlick.width
                             text: backend.logs
-                            readOnly: true
-                            wrapMode: TextEdit.Wrap
+                            wrapMode: Text.Wrap
                             font.pixelSize: 12
                             font.family: "Poppins"
                             color: "#E6EEE8"
-                            background: null
-                            selectByMouse: true
+
+                            onTextChanged: {
+                                Qt.callLater(function() {
+                                    logFlick.scrollToBottom()
+                                })
+                            }
                         }
                     }
                 }
