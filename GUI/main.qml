@@ -784,6 +784,7 @@ Window {
                     }
 
                     ScrollView {
+                        id: logScrollView
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
@@ -815,6 +816,14 @@ Window {
                             color: "#E6EEE8"
                             background: null
                             selectByMouse: true
+
+                            onTextChanged: {
+                                Qt.callLater(function() {
+                                    if (logScrollView.ScrollBar.vertical) {
+                                        logScrollView.ScrollBar.vertical.position = 1.0
+                                    }
+                                })
+                            }
                         }
                     }
                 }
