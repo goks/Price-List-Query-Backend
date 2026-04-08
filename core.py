@@ -5,6 +5,7 @@ import json
 import hashlib
 import datetime
 import logging
+import re
 import pyodbc
 import json
 from PIL import Image
@@ -62,10 +63,29 @@ def fetch_groups(cursor):
     cursor.execute("SELECT Code,Name FROM Master1 WHERE MasterType=5 AND DeactiveMaster=0")
     return {row.Code: row.Name for row in cursor.fetchall()}
 
+def fetch_tax_names(cursor):
+    cursor.execute("SELECT Code,Name FROM Master1 WHERE MasterType=25 AND DeactiveMaster=0")
+    return {row.Code: row.Name for row in cursor.fetchall()}
+
+def extract_tax_percent(tax_name):
+    if not tax_name:
+        return None
+
+    normalized_name = str(tax_name).strip()
+    if normalized_name in {"Zero Rated", "Exempt", "Nil Rated", "Non-GST"}:
+        return 0
+
+    gst_match = re.match(r"GST\s+(\d+(?:\.\d+)?)%", normalized_name, flags=re.IGNORECASE)
+    if not gst_match:
+        return None
+
+    tax_value = float(gst_match.group(1))
+    return int(tax_value) if tax_value.is_integer() else tax_value
+
 
 def fetch_items(cursor, modified_after):
     cursor.execute("""
-        SELECT M.Code, MasterType, Name, Alias, D3, CM1, D16, D2,
+        SELECT M.Code, MasterType, Name, Alias, D3, CM1, CM8, D16, D2,
                Image1, FormatType1, ParentGrp,M.DeactiveMaster, M.BlockedMaster,
                CASE 
                    WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
@@ -104,12 +124,14 @@ def upload_active_ids_to_firestore(active_ids: set):
         "updatedAt": datetime.datetime.utcnow().isoformat()
     }, merge=True)
 
-def build_item(row, units, groups, timestamp):
+def build_item(row, units, groups, taxes, timestamp):
     code = row.Code or "-"
     name = sanitize_name(row.Name)
     alias = sanitize_name(row.Alias)
     price = row.D3 or 0
     unit = units.get(row.CM1, "Unknown")
+    tax_name = taxes.get(row.CM8)
+    tax_percent = extract_tax_percent(tax_name)
     disc = row.D16 or 0
     mrp = row.D2 or 0
     group = groups.get(row.ParentGrp, "Unknown")
@@ -125,6 +147,7 @@ def build_item(row, units, groups, timestamp):
         "Name": name,
         "PRICE3": price,
         "Unit": unit,
+        "TaxPercent": tax_percent,
         "DiscPercent": disc,
         "MRP": mrp,
         "Group": group,
@@ -146,7 +169,7 @@ def get_items_by_mastercodes(mastercodes: set):
     cur = conn.cursor()
     placeholders = ",".join(["?"] * len(mastercodes))
     query = f"""
-    SELECT M.Code, MasterType, Name, Alias, D3, CM1, D16, D2,
+    SELECT M.Code, MasterType, Name, Alias, D3, CM1, CM8, D16, D2,
            Image1, FormatType1, ParentGrp, M.DeactiveMaster, M.BlockedMaster,
            CASE 
                WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
@@ -196,10 +219,11 @@ def get_all_items():
     cur = conn.cursor()
     units = fetch_units(cur)
     groups = fetch_groups(cur)
+    taxes = fetch_tax_names(cur)
 
     # Fetch all items regardless of date
     cur.execute("""
-        SELECT M.Code, MasterType, Name, Alias, D3, CM1, D16, D2,
+        SELECT M.Code, MasterType, Name, Alias, D3, CM1, CM8, D16, D2,
                Image1, FormatType1, ParentGrp, M.DeactiveMaster, M.BlockedMaster,
                CASE 
                    WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
@@ -215,7 +239,7 @@ def get_all_items():
     for row in rows:
         if row.DeactiveMaster or row.BlockedMaster:
             continue  # Skip blocked/deactivated
-        item_data, img, ext = build_item(row, units, groups, now)
+        item_data, img, ext = build_item(row, units, groups, taxes, now)
         item_tuples.append((item_data, img, ext))  # return all 3
     return item_tuples
 
@@ -377,6 +401,7 @@ def run_sync():
     cur = conn.cursor()
     units = fetch_units(cur)
     groups = fetch_groups(cur)
+    taxes = fetch_tax_names(cur)
     items = fetch_items(cur, prev)
 
     updated_images = []
@@ -401,7 +426,7 @@ def run_sync():
             commit_if_needed()
             continue
         
-        data, img, ext = build_item(row, units, groups, now)
+        data, img, ext = build_item(row, units, groups, taxes, now)
 
         batch.set(ITEMS_COL.document(str(data["MasterCode"])), data)
         log_output.append(f"📦 Uploaded {data['Name']}")
@@ -453,7 +478,7 @@ def run_sync():
         rows = get_items_by_mastercodes(ids_to_add)  # Make sure this returns List[Item] or List[Row]
 
         for row in rows:
-            data, img, ext = build_item(row, units, groups, now)
+            data, img, ext = build_item(row, units, groups, taxes, now)
             batch.set(ITEMS_COL.document(str(data["MasterCode"])), data)
             log_output.append(f"📦 Uploaded {data['Name']}")
             op_count += 1
