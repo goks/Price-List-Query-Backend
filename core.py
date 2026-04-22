@@ -75,11 +75,23 @@ def extract_tax_percent(tax_name):
     if normalized_name in {"Zero Rated", "Exempt", "Nil Rated", "Non-GST"}:
         return 0
 
-    gst_match = re.match(r"GST\s+(\d+(?:\.\d+)?)%", normalized_name, flags=re.IGNORECASE)
+    gst_match = re.match(r"GST\s+(\d+(?:\.\d+)?)%(?:\s*->\s*(\d+(?:\.\d+)?)%)?", normalized_name, flags=re.IGNORECASE)
     if not gst_match:
         return None
 
-    tax_value = float(gst_match.group(1))
+    first_tax = float(gst_match.group(1))
+    second_tax = gst_match.group(2)
+    if second_tax:
+        tax_value = float(second_tax)
+    else:
+        tax_value = first_tax
+
+    second_tax = gst_match.group(2)
+    if second_tax:
+        tax_value = float(second_tax)
+    else:
+        tax_value = first_tax
+
     return int(tax_value) if tax_value.is_integer() else tax_value
 
 
