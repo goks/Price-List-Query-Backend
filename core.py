@@ -77,6 +77,17 @@ STOCK_SUBQUERY = """
     ) AS Stock
 """
 
+SUPPORT_PRICES_JOIN = """
+    LEFT JOIN (
+        SELECT MasterCode,
+            MAX(CASE WHEN I1 = 101 THEN D1 END) AS PriceA,
+            MAX(CASE WHEN I1 = 102 THEN D1 END) AS PriceB,
+            MAX(CASE WHEN I1 = 103 THEN D1 END) AS PriceC
+        FROM MasterSupport
+        GROUP BY MasterCode
+    ) MS ON MS.MasterCode = M.Code
+"""
+
 def extract_tax_percent(tax_name):
     if not tax_name:
         return None
@@ -113,9 +124,13 @@ def fetch_items(cursor, modified_after):
                    WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
                    ELSE ModificationTime
                END AS EffectiveTime,
-               {STOCK_SUBQUERY}
+               {STOCK_SUBQUERY},
+               MS.PriceA,
+               MS.PriceB,
+               MS.PriceC
         FROM Master1 M
         LEFT JOIN Images I ON M.Code = I.Code
+        {SUPPORT_PRICES_JOIN}
         WHERE MasterType = 6 
               AND (
                   CASE 
@@ -166,12 +181,19 @@ def build_item(row, units, groups, taxes, timestamp):
         img = Image.open(io.BytesIO(row.Image1))
         ext = row.FormatType1 or ".jpg"
 
+    price_a = float(row.PriceA or 0)
+    price_b = float(row.PriceB or 0)
+    price_c = float(row.PriceC or 0)
+
     item_data = {
         "MasterCode": code,
         "Code": alias,
         "Name": name,
         "PRICE3": price,
         "PurchasePrice": purchase_price,
+        "PriceA": price_a,
+        "PriceB": price_b,
+        "PriceC": price_c,
         "Stock": stock,
         "Unit": unit,
         "TaxPercent": tax_percent,
@@ -202,9 +224,13 @@ def get_items_by_mastercodes(mastercodes: set):
                WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
                ELSE ModificationTime
            END AS EffectiveTime,
-           {STOCK_SUBQUERY}
+           {STOCK_SUBQUERY},
+           MS.PriceA,
+           MS.PriceB,
+           MS.PriceC
     FROM Master1 M
     LEFT JOIN Images I ON M.Code = I.Code
+    {SUPPORT_PRICES_JOIN}
     WHERE MasterType = 6
       AND M.Code IN ({placeholders})"""
     cur.execute(query, list(mastercodes))
@@ -258,9 +284,13 @@ def get_all_items():
                    WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
                    ELSE ModificationTime
                END AS EffectiveTime,
-               {STOCK_SUBQUERY}
+               {STOCK_SUBQUERY},
+               MS.PriceA,
+               MS.PriceB,
+               MS.PriceC
         FROM Master1 M
         LEFT JOIN Images I ON M.Code = I.Code
+        {SUPPORT_PRICES_JOIN}
         WHERE MasterType = 6
     """)
     rows = cur.fetchall()
