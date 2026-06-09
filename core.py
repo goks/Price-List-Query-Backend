@@ -44,6 +44,7 @@ SQL_CONNECTION_TIMEOUT = 5
 # --- Firestore Meta Fields ---
 META_DOC = firestore_db.collection("DB_Service").document("serverSideData")
 ITEMS_COL = firestore_db.collection("items")
+SENSITIVE_ITEMS_COL = firestore_db.collection("sensitive_item_data")
 BUCKET = storage.bucket()
 ACTIVE_IDS_DOC = firestore_db.collection("DB_Service").document("active_ids_snapshot")
 log_output = []
@@ -167,12 +168,34 @@ def upload_active_ids_to_firestore(active_ids: set):
         "updatedAt": datetime.datetime.utcnow().isoformat()
     }, merge=True)
 
+
+def build_sensitive_item_data(row, timestamp):
+    code = row.Code or "-"
+    alias = sanitize_name(row.Alias)
+    name = sanitize_name(row.Name)
+    purchase_price = float(row.PurchasePrice or 0)
+    price_a = float(row.PriceA or 0)
+    price_b = float(row.PriceB or 0)
+    price_c = float(row.PriceC or 0)
+
+    return {
+        "MasterCode": code,
+        "Code": alias,
+        "Name": name,
+        "PurchasePrice": purchase_price,
+        "PriceA": price_a,
+        "PriceB": price_b,
+        "PriceC": price_c,
+        "lastFBUpdate": timestamp,
+        "lastFBUpdateStr": timestamp.strftime('%Y-%m-%d %H:%M:%S')
+    }
+
+
 def build_item(row, units, groups, taxes, timestamp):
     code = row.Code or "-"
     name = sanitize_name(row.Name)
     alias = sanitize_name(row.Alias)
     price = row.D3 or 0
-    purchase_price = row.PurchasePrice or 0
     stock = float(row.Stock or 0)
     unit = units.get(row.CM1, "Unknown")
     tax_name = taxes.get(row.CM8)
@@ -186,19 +209,11 @@ def build_item(row, units, groups, taxes, timestamp):
         img = Image.open(io.BytesIO(row.Image1))
         ext = row.FormatType1 or ".jpg"
 
-    price_a = float(row.PriceA or 0)
-    price_b = float(row.PriceB or 0)
-    price_c = float(row.PriceC or 0)
-
     item_data = {
         "MasterCode": code,
         "Code": alias,
         "Name": name,
         "PRICE3": price,
-        "PurchasePrice": purchase_price,
-        "PriceA": price_a,
-        "PriceB": price_b,
-        "PriceC": price_c,
         "Stock": stock,
         "Unit": unit,
         "TaxPercent": tax_percent,
@@ -264,12 +279,12 @@ def get_firestore_item_ids():
     return set(doc_ref.id for doc_ref in doc_refs)
 
 
-def delete_firestore_docs_by_ids(ids, batch_size=500):
+def delete_firestore_docs_by_ids(ids, collection_ref=ITEMS_COL, batch_size=500):
     ids = list(ids)
     for i in range(0, len(ids), batch_size):
         batch = firestore_db.batch()
         for id_ in ids[i:i + batch_size]:
-            batch.delete(ITEMS_COL.document(id_))
+            batch.delete(collection_ref.document(id_))
         batch.commit()
 
 def get_all_items():
@@ -305,14 +320,15 @@ def get_all_items():
         if row.DeactiveMaster or row.BlockedMaster:
             continue  # Skip blocked/deactivated
         item_data, img, ext = build_item(row, units, groups, taxes, now)
-        item_tuples.append((item_data, img, ext))  # return all 3
+        sensitive_data = build_sensitive_item_data(row, now)
+        item_tuples.append((item_data, sensitive_data, img, ext))
     return item_tuples
 
 
-def delete_all_items_in_batches(items_ref, log_func=None, on_progress=None):
-    """Deletes all documents in the 'items' collection in batches."""
+def delete_all_documents_in_batches(collection_ref, log_func=None, on_progress=None):
+    """Deletes all documents in a Firestore collection in batches."""
     batch_size = 500
-    docs = list(items_ref.stream())
+    docs = list(collection_ref.stream())
     total_docs = len(docs)
     total_deleted = 0
 
@@ -324,9 +340,9 @@ def delete_all_items_in_batches(items_ref, log_func=None, on_progress=None):
         batch.commit()
         total_deleted += len(batch_docs)
         if log_func:
-            log_func(f"🗑️ Deleted batch {i // batch_size + 1}: {len(batch_docs)} items")
+            log_func(f"🗑️ Deleted batch {i // batch_size + 1}: {len(batch_docs)} documents")
         if on_progress:
-            on_progress(total_deleted, 0)  # 0 images during deletion
+            on_progress(total_deleted, 0)
 
     if log_func:
         log_func(f"✅ Deleted {total_deleted} documents.")
@@ -341,11 +357,14 @@ def clear_and_full_upload(log_func=print, on_progress=None):
 
     log("⚠️ Starting full Firestore upload...")
 
-    items_ref = firestore_db.collection("items")
+    items_ref = ITEMS_COL
+    sensitive_items_ref = SENSITIVE_ITEMS_COL
 
     # Step 1: Delete in batches
-    total_deleted = delete_all_items_in_batches(items_ref, log_func=log, on_progress=on_progress)
-    log(f"✅ Deleted {total_deleted} items from Firestore.")
+    total_deleted_items = delete_all_documents_in_batches(items_ref, log_func=log, on_progress=on_progress)
+    log(f"✅ Deleted {total_deleted_items} items from Firestore.")
+    total_deleted_sensitive = delete_all_documents_in_batches(sensitive_items_ref, log_func=log, on_progress=on_progress)
+    log(f"✅ Deleted {total_deleted_sensitive} sensitive documents from Firestore.")
 
     # Step 2: Upload items and images
     all_items = get_all_items()
@@ -357,22 +376,20 @@ def clear_and_full_upload(log_func=print, on_progress=None):
         batch = firestore_db.batch()
         chunk = all_items[i:i+500]
 
-        for item_data, img, ext in chunk:
-            doc_ref = items_ref.document(str(item_data['MasterCode']))
-            batch.set(doc_ref, item_data)
+        for item_data, sensitive_data, img, ext in chunk:
+            item_doc_ref = items_ref.document(str(item_data['MasterCode']))
+            batch.set(item_doc_ref, item_data)
+            sensitive_doc_ref = sensitive_items_ref.document(str(item_data['MasterCode']))
+            batch.set(sensitive_doc_ref, sensitive_data)
 
             if img:
                 image_filename = f"{item_data['MasterCode']}{ext}"
-                image_path = os.path.join(IMAGE_DIR, image_filename)
-
-                # Save and upload if not already present
-                if not os.path.exists(image_path):
-                    img.save(image_path)
-                    log(f"💾 Saved missing image for {item_data['Name']}")
-                    blob = BUCKET.blob(image_filename)
-                    blob.upload_from_filename(image_path)
-                    updated_images += 1
-                    log(f"🖼️ Uploaded image for {item_data['Name']}")
+                blob = BUCKET.blob(image_filename)
+                if blob.exists():
+                    # log(f"🖼️ Image present in Firebase for {item_data['Name']}")
+                    pass
+                else:
+                    log(f"⚠️ Missing image in Firebase for {item_data['Name']} ({image_filename})")
 
         batch.commit()
         uploaded = min(i + 500, total_items)
@@ -482,20 +499,25 @@ def run_sync():
             batch = firestore_db.batch()
             op_count = 0
 
+    sensitive_ref = SENSITIVE_ITEMS_COL
+
     for row in items:
         doc_id = str(row.Code)
         if row.DeactiveMaster or row.BlockedMaster:
             batch.delete(ITEMS_COL.document(doc_id))
+            batch.delete(sensitive_ref.document(doc_id))
             log_output.append(f"🗑️ Deleted {row.Name} (deactivated or blocked)")
-            op_count += 1
+            op_count += 2
             commit_if_needed()
             continue
         
         data, img, ext = build_item(row, units, groups, taxes, now)
+        sensitive_data = build_sensitive_item_data(row, now)
 
         batch.set(ITEMS_COL.document(str(data["MasterCode"])), data)
+        batch.set(sensitive_ref.document(str(data["MasterCode"])), sensitive_data)
         log_output.append(f"📦 Uploaded {data['Name']}")
-        op_count += 1
+        op_count += 2
         commit_if_needed()
 
         if img:
@@ -511,7 +533,6 @@ def run_sync():
     # --- Identify and delete Firestore docs no longer in SQL ---
     active_sql_ids = get_all_ids()
     # Load existing Firestore IDs from local cache or fetch from server
-    local_ids_file = "last_firestore_ids.json"
     if os.path.exists(local_ids_file):
         existing_firestore_ids = load_local_firestore_ids(local_ids_file)
     else:
@@ -528,9 +549,10 @@ def run_sync():
     if ids_to_delete:
         log_output.append(f"🗑️ Removing {len(ids_to_delete)} stale items from Firestore...")
         logging.info(f"🗑️ Removing {len(ids_to_delete)} stale items: {sorted(ids_to_delete)}")
-        delete_firestore_docs_by_ids(ids_to_delete)
+        delete_firestore_docs_by_ids(ids_to_delete, collection_ref=ITEMS_COL)
+        delete_firestore_docs_by_ids(ids_to_delete, collection_ref=sensitive_ref)
         for doc_id in ids_to_delete:
-            log_output.append(f"🗑️ Deleted stale item: {doc_id}")
+            log_output.append(f"🗑️ Deleted stale item and sensitive doc: {doc_id}")
     else:
         log_output.append("✅ No stale Firestore items found for deletion.")
         logging.info("✅ No stale Firestore items found for deletion.")
@@ -544,9 +566,11 @@ def run_sync():
 
         for row in rows:
             data, img, ext = build_item(row, units, groups, taxes, now)
+            sensitive_data = build_sensitive_item_data(row, now)
             batch.set(ITEMS_COL.document(str(data["MasterCode"])), data)
+            batch.set(sensitive_ref.document(str(data["MasterCode"])), sensitive_data)
             log_output.append(f"📦 Uploaded {data['Name']}")
-            op_count += 1
+            op_count += 2
             commit_if_needed()
             if img:
                 img_path = os.path.join(IMAGE_DIR, f"{row.Code}{ext}")

@@ -257,7 +257,8 @@ class MainWindow(QObject):
 
     def loadLastUpdated(self):
         try:
-            doc_dict = core.firestore_db.collection("DB_Service").document("serverSideData").get().to_dict()
+            doc_ref = core.firestore_db.collection("DB_Service").document("serverSideData")
+            doc_dict = doc_ref.get(timeout=10).to_dict()
             ts = doc_dict.get("latestImportFromServer", None) if doc_dict else None  # type: ignore
 
             if isinstance(ts, datetime):
@@ -302,6 +303,9 @@ class MainWindow(QObject):
             dt = now.replace(tzinfo=pytz.utc).astimezone(IST)
             self._status = f"Uploaded {item_count} items"
             self._lastUpdated = dt.strftime("%d-%m-%Y %H:%M")
+        except (KeyboardInterrupt, TimeoutError) as exc:
+            self._status = f"Cancelled or timed out: {exc}"
+            self.appendLog(f"⚠️ Rebuild interrupted: {exc}")
         except Exception as exc:
             traceback.print_exc()
             self._status = f"Error: {exc}"
@@ -669,6 +673,9 @@ class MainWindow(QObject):
             self._status = f"Success: {item_count} items, {image_count} images"
             self._lastUpdated = dt.strftime("%d-%m-%Y %H:%M")
             self._logs = logs
+        except (KeyboardInterrupt, TimeoutError) as exc:
+            self._status = f"Cancelled or timed out: {exc}"
+            self.appendLog(f"⚠️ Sync interrupted: {exc}")
         except Exception as exc:
             traceback.print_exc()
             self._status = f"Error: {exc}"
@@ -746,7 +753,7 @@ if __name__ == "__main__":
     def delayed_setup():
         core.SERVERNAME = win._dbServer
         core.DATABASENAME = win._dbName
-        win.loadLastUpdated()
+        win.threadpool.start(Worker(win.loadLastUpdated))
         win.checkDbConnection()
         win.checkForUpdates()
         if win._autostartEnabled != win.checkWindowsAutostart():
