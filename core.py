@@ -67,6 +67,16 @@ def fetch_tax_names(cursor):
     cursor.execute("SELECT Code,Name FROM Master1 WHERE MasterType=25 AND DeactiveMaster=0")
     return {row.Code: row.Name for row in cursor.fetchall()}
 
+STOCK_SUBQUERY = """
+    (SELECT SUM(
+        F.D1 + ISNULL(F.D23,0) + ISNULL(F.D24,0) + ISNULL(F.D25,0) + ISNULL(F.D26,0) + ISNULL(F.D27,0) + ISNULL(F.D28,0) + ISNULL(F.D29,0) + ISNULL(F.D30,0) + ISNULL(F.D31,0) + ISNULL(F.D32,0) + ISNULL(F.D33,0)
+        - ISNULL(F.D11,0) - ISNULL(F.D12,0) - ISNULL(F.D13,0) - ISNULL(F.D14,0) - ISNULL(F.D15,0) - ISNULL(F.D16,0) - ISNULL(F.D17,0) - ISNULL(F.D18,0) - ISNULL(F.D19,0) - ISNULL(F.D20,0) - ISNULL(F.D21,0)
+    )
+    FROM dbo.Folio1 F
+    WHERE F.MasterCode = M.Code
+    ) AS Stock
+"""
+
 def extract_tax_percent(tax_name):
     if not tax_name:
         return None
@@ -96,13 +106,14 @@ def extract_tax_percent(tax_name):
 
 
 def fetch_items(cursor, modified_after):
-    cursor.execute("""
-        SELECT M.Code, MasterType, Name, Alias, D3, CM1, CM8, D16, D2,
-               Image1, FormatType1, ParentGrp,M.DeactiveMaster, M.BlockedMaster,
+    cursor.execute(f"""
+        SELECT M.Code, MasterType, Name, Alias, D3, M.D4 AS PurchasePrice, CM1, CM8, D16, D2,
+               Image1, FormatType1, ParentGrp, M.DeactiveMaster, M.BlockedMaster,
                CASE 
                    WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
                    ELSE ModificationTime
-               END AS EffectiveTime
+               END AS EffectiveTime,
+               {STOCK_SUBQUERY}
         FROM Master1 M
         LEFT JOIN Images I ON M.Code = I.Code
         WHERE MasterType = 6 
@@ -141,6 +152,8 @@ def build_item(row, units, groups, taxes, timestamp):
     name = sanitize_name(row.Name)
     alias = sanitize_name(row.Alias)
     price = row.D3 or 0
+    purchase_price = row.PurchasePrice or 0
+    stock = float(row.Stock or 0)
     unit = units.get(row.CM1, "Unknown")
     tax_name = taxes.get(row.CM8)
     tax_percent = extract_tax_percent(tax_name)
@@ -158,6 +171,8 @@ def build_item(row, units, groups, taxes, timestamp):
         "Code": alias,
         "Name": name,
         "PRICE3": price,
+        "PurchasePrice": purchase_price,
+        "Stock": stock,
         "Unit": unit,
         "TaxPercent": tax_percent,
         "DiscPercent": disc,
@@ -181,18 +196,20 @@ def get_items_by_mastercodes(mastercodes: set):
     cur = conn.cursor()
     placeholders = ",".join(["?"] * len(mastercodes))
     query = f"""
-    SELECT M.Code, MasterType, Name, Alias, D3, CM1, CM8, D16, D2,
+    SELECT M.Code, MasterType, Name, Alias, D3, M.D4 AS PurchasePrice, CM1, CM8, D16, D2,
            Image1, FormatType1, ParentGrp, M.DeactiveMaster, M.BlockedMaster,
            CASE 
                WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
                ELSE ModificationTime
-           END AS EffectiveTime
+           END AS EffectiveTime,
+           {STOCK_SUBQUERY}
     FROM Master1 M
     LEFT JOIN Images I ON M.Code = I.Code
     WHERE MasterType = 6
       AND M.Code IN ({placeholders})"""
     cur.execute(query, list(mastercodes))
     rows = cur.fetchall()
+    conn.close()
     return rows  
 # Add this function to extract all items for full sync
 def get_all_ids():
@@ -234,13 +251,14 @@ def get_all_items():
     taxes = fetch_tax_names(cur)
 
     # Fetch all items regardless of date
-    cur.execute("""
-        SELECT M.Code, MasterType, Name, Alias, D3, CM1, CM8, D16, D2,
+    cur.execute(f"""
+        SELECT M.Code, MasterType, Name, Alias, D3, M.D4 AS PurchasePrice, CM1, CM8, D16, D2,
                Image1, FormatType1, ParentGrp, M.DeactiveMaster, M.BlockedMaster,
                CASE 
                    WHEN CAST(ModificationTime AS time) = '00:00:00' THEN CreationTime
                    ELSE ModificationTime
-               END AS EffectiveTime
+               END AS EffectiveTime,
+               {STOCK_SUBQUERY}
         FROM Master1 M
         LEFT JOIN Images I ON M.Code = I.Code
         WHERE MasterType = 6
