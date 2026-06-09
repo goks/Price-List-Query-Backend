@@ -8,6 +8,7 @@ import logging
 import re
 import pyodbc
 import json
+from pathlib import Path
 from PIL import Image
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
@@ -17,8 +18,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- Paths ---
 BASE_PATH = getattr(sys, '_MEIPASS', os.path.abspath("."))
-IMAGE_DIR = os.path.join(BASE_PATH, "itemImages")
+APP_DATA_DIR = Path(os.getenv("APPDATA") or Path.home() / ".ga_price_uploader") / "GA Price Uploader"
+APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+IMAGE_DIR = str(APP_DATA_DIR / "itemImages")
 os.makedirs(IMAGE_DIR, exist_ok=True)
+SNAPSHOT_FILE = str(APP_DATA_DIR / "last_stock_snapshot.json")
+FIRESTORE_IDS_FILE = str(APP_DATA_DIR / "last_firestore_ids.json")
 
 # --- Firebase Init ---
 CERT_PATH = os.path.join(BASE_PATH, r"service-account\gokul-agencies-firebase-adminsdk-ti855-702f214fc5.json")
@@ -398,9 +403,9 @@ def run_sync():
     global log_output
     log_output.clear()
     # Local cache filename for Firestore IDs
-    local_ids_file = "last_firestore_ids.json"
+    local_ids_file = FIRESTORE_IDS_FILE
     # Check for existing stock snapshot and compare stock changes
-    snapshot_file = "last_stock_snapshot.json"
+    snapshot_file = SNAPSHOT_FILE
     # Load previous snapshot or create in-memory if missing
     if os.path.exists(snapshot_file):
         try:
@@ -583,7 +588,7 @@ def run_sync():
     return len(items), len(updated_images), now, log_output
 
 # Local cache for Firestore IDs
-def load_local_firestore_ids(filename="last_firestore_ids.json"):
+def load_local_firestore_ids(filename=FIRESTORE_IDS_FILE):
     if os.path.exists(filename):
         try:
             return set(json.load(open(filename, "r", encoding="utf-8")))
@@ -591,7 +596,7 @@ def load_local_firestore_ids(filename="last_firestore_ids.json"):
             return set()
     return set()
 
-def save_local_firestore_ids(ids: set, filename="last_firestore_ids.json"):
+def save_local_firestore_ids(ids: set, filename=FIRESTORE_IDS_FILE):
     try:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(sorted(list(ids)), f)
@@ -599,11 +604,11 @@ def save_local_firestore_ids(ids: set, filename="last_firestore_ids.json"):
         pass
 
 # Utility function to save stock data locally as JSON
-def save_stock_snapshot(stock_dict, filename="last_stock_snapshot.json"):
+def save_stock_snapshot(stock_dict, filename=SNAPSHOT_FILE):
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(stock_dict, f, indent=2)
 # Fetch all item stocks with details and save locally
-def fetch_and_save_all_item_stocks_with_details(filename="last_stock_snapshot.json"):
+def fetch_and_save_all_item_stocks_with_details(filename=SNAPSHOT_FILE):
     """
     Fetch stock and details for all items, save to JSON, and return the list.
     Returns a list of dicts: [{MasterCode, Name, Alias, Stock, ...}, ...]
