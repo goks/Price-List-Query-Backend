@@ -424,6 +424,7 @@ def run_sync():
     # Check for existing stock snapshot and compare stock changes
     snapshot_file = SNAPSHOT_FILE
     # Load previous snapshot or create in-memory if missing
+    now = datetime.datetime.utcnow()
     if os.path.exists(snapshot_file):
         try:
             with open(snapshot_file, "r", encoding="utf-8") as f:
@@ -444,10 +445,10 @@ def run_sync():
         curr = item['Stock']
         prev = prev_map.get(code, 0)
         delta = curr - prev
-        # only record items with stock increase >=10 and positive final stock
-        if delta >= 10 and curr > 0:
+        # only record items with stock delta >=10 
+        if abs(delta) >= 10:
             changes.append((code, name, prev, curr, delta))
-    log_output.append(f"📊 Significant stock increases (>=10): {len(changes)} items")
+    log_output.append(f"📊 Significant stock change (>=10): {len(changes)} items")
     for code, name, prev, curr, delta in changes:
         log_output.append(f" - {code} ({name}): {prev} -> {curr} (Δ{delta})")
     # Publish changes to Firestore for app consumption
@@ -460,10 +461,26 @@ def run_sync():
             ],
             "updatedAt": datetime.datetime.utcnow().isoformat()
         })
-        log_output.append("📢 Published stock changes to Firestore.")
+
+        if changes:
+            stock_batch = firestore_db.batch()
+            for code, _, _, curr, _ in changes:
+                stock_batch.set(
+                    ITEMS_COL.document(str(code)),
+                    {
+                        "Stock": curr,
+                        "lastFBUpdate": now,
+                        "lastFBUpdateStr": now.strftime('%Y-%m-%d %H:%M:%S')
+                    },
+                    merge=True
+                )
+            stock_batch.commit()
+            log_output.append(f"🟢 Updated stock and FB timestamps for {len(changes)} item docs in Firestore.")
+
+        log_output.append("✅ Published stock changes to Firestore.")
     except Exception as e:
-        log_output.append(f"❌ Failed to publish stock changes: {e}")
-    now = datetime.datetime.utcnow()
+        log_output.append(f"❌ Failed to publish stock changes or update item docs: {e}")
+    
 
     # Get previous timestamp from Firestore meta
     meta_dict = META_DOC.get().to_dict()
