@@ -1,4 +1,4 @@
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 
 
 def get_version_parts() -> tuple[int, int, int]:
