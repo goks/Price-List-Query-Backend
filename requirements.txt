@@ -6,3 +6,4 @@ PySide6
 pytz
 boto3
 keyring
+pyzk==0.9

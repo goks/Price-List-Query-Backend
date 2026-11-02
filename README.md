@@ -122,7 +122,57 @@ settings. The secret lives in that Windows user's Credential Manager; production
 must run under the same Windows account that saved the R2 secret. If the Windows
 user changes, save the R2 secret again under the production account.
 
-Run the focused backup tests with `python -m unittest discover -s tests -v`.
+## eTimeTrackLite K90 Pro attendance import
+
+The **Attendance Import** tab connects directly from the Windows app computer to
+the K90 Pro over the local TCP/IP network. Keep the machine reachable on the same
+LAN and allow the configured TCP port (default `4370`) between that computer and
+the terminal. The port and communication key must match the machine's network
+settings.
+
+Enter the machine IP address and port, optionally enter its numeric communication
+key, set an independent import interval from 1 to 168 hours, and save. The
+communication key is stored in the current Windows user's Credential Manager;
+only the address, port, interval, and schedule preference are stored in app
+settings. Test the connection before enabling the schedule. The automatic import
+runs only while the app process is running and is independent of price-list sync.
+The Attendance Import tab keeps device/schedule fields under a collapsible
+Settings control, shows transfer progress during imports, and displays the
+current local day's imported attendance rows after a successful import.
+
+The importer reads device name/serial/firmware/network metadata, user IDs and
+basic employee fields, and attendance timestamps/status/punch values. It does
+not change the machine, upload passwords, or read/upload fingerprint templates.
+Records are written to the existing Firestore project in:
+
+- `attendance_devices` — one document per device
+- `attendance_employees` — device-scoped employee records
+- `attendance_logs` — device-scoped attendance records
+- `attendance_sync_state` — incremental import checkpoint and last-run metadata
+
+Attendance document IDs are deterministic. Each import rechecks a 24-hour overlap
+before the last successful attendance timestamp, checks those IDs in Firestore,
+and writes only attendance documents that do not already exist. The checkpoint
+advances only after all data writes succeed. Employee records are refreshed to
+pick up changes; device metadata is also updated.
+
+The PyZK `get_attendance()` API reads the terminal's attendance list as a whole;
+it does not expose a server-side cursor for fetching only records after a
+checkpoint. The importer filters to the checkpoint overlap and prevents
+re-uploading existing attendance documents, but the device protocol/library still
+transfers the stored attendance list to the app on each run. Keep the terminal's
+retained-log volume in mind if network read time becomes an issue.
+
+This feature uses PyZK, an unofficial GPL-2.0 library for ZK-family attendance
+devices, rather than an official K90 Pro SDK. Its documented API includes device
+information, users, and attendance reads, but this exact K90 Pro firmware has
+not been tested from this app. Use **Test Connection** and confirm the imported
+records before relying on automatic sync. Do not expose the device's TCP port to
+the public internet. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) and
+review the GPL-2.0 source and redistribution obligations before distributing a
+bundled application.
+
+Run the focused tests with `python -m unittest discover -s tests -v`.
 
 ## Release Flow
 - Trigger the `Version Bump` GitHub Actions workflow.

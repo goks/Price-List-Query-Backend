@@ -5,7 +5,13 @@ from pathlib import Path
 
 root = Path.cwd()
 data_pairs = []
-for relative_path in ("GUI", "icons", "service-account", "fonts"):
+for relative_path in (
+    "GUI",
+    "icons",
+    "service-account",
+    "fonts",
+    "THIRD_PARTY_NOTICES.md",
+):
     source = root / relative_path
     if source.exists():
         data_pairs.append((str(source), relative_path))
@@ -26,6 +32,10 @@ a = Analysis(
         "boto3.s3.transfer",
         "keyring.backends.Windows",
         "win32ctypes.pywin32",
+        "zk",
+        "zk.base",
+        "zk.user",
+        "zk.attendance",
     ],
     hookspath=[],
     hooksconfig={},

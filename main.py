@@ -24,6 +24,7 @@ from app_version import APP_VERSION
 import core
 import backup_service
 import r2_service
+import attendance_service
 
 IST = pytz.timezone("Asia/Calcutta")
 APP_NAME = "GA Price Uploader"
@@ -126,6 +127,13 @@ class MainWindow(QObject):
     r2SettingsChanged = Signal()  # type: ignore
     r2UploadEnabledChanged = Signal()  # type: ignore
     r2TransferChanged = Signal(int, int, str, bool)
+    attendanceConfigChanged = Signal()
+    attendanceScheduleEnabledChanged = Signal()
+    attendanceIntervalHoursChanged = Signal()
+    attendanceStatusChanged = Signal()
+    attendanceHistoryChanged = Signal()
+    attendanceTodayRowsChanged = Signal()
+    attendanceProgressChanged = Signal(int, int, str, bool)
     appVersionChanged = Signal()  # type: ignore
     latestVersionChanged = Signal()  # type: ignore
     updateStatusChanged = Signal()  # type: ignore
@@ -160,6 +168,13 @@ class MainWindow(QObject):
         self._r2AccessKeyId = ""
         self._r2Prefix = "sql-backups"
         self._r2UploadEnabled = False
+        self._attendanceHost = "192.168.10.102"
+        self._attendancePort = 4370
+        self._attendanceIntervalHours = 24
+        self._attendanceScheduleEnabled = False
+        self._attendanceStatus = "Configure the K90 Pro connection, then test it."
+        self._attendanceHistory: list[str] = []
+        self._attendanceTodayRows: list[dict[str, Any]] = []
 
         self._appVersion = APP_VERSION
         self._latestVersion = APP_VERSION
@@ -179,6 +194,9 @@ class MainWindow(QObject):
         self.backupScheduleTimer.setSingleShot(True)
         self.backupScheduleTimer.timeout.connect(self.onScheduledBackupTrigger)
         self.startBackupSchedule()
+        self.attendanceScheduleTimer = QTimer()
+        self.attendanceScheduleTimer.timeout.connect(self.onScheduledAttendanceImport)
+        self.startAttendanceSchedule()
 
     def getAutostartCommand(self) -> str:
         if getattr(sys, "frozen", False):
@@ -212,6 +230,16 @@ class MainWindow(QObject):
                 self._r2AccessKeyId = str(settings.get("r2AccessKeyId", ""))
                 self._r2Prefix = str(settings.get("r2Prefix", "sql-backups"))
                 self._r2UploadEnabled = bool(settings.get("r2UploadEnabled", False))
+                self._attendanceHost = str(
+                    settings.get("attendanceHost", self._attendanceHost)
+                )
+                self._attendancePort = int(settings.get("attendancePort", 4370))
+                interval_hours = int(settings.get("attendanceIntervalHours", 24))
+                if 1 <= interval_hours <= 168:
+                    self._attendanceIntervalHours = interval_hours
+                self._attendanceScheduleEnabled = bool(
+                    settings.get("attendanceScheduleEnabled", False)
+                )
                 schedule_time = str(settings.get("backupScheduleTime", "02:00"))
                 if re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", schedule_time):
                     self._backupScheduleTime = schedule_time
@@ -242,6 +270,10 @@ class MainWindow(QObject):
                 "r2AccessKeyId": self._r2AccessKeyId,
                 "r2Prefix": self._r2Prefix,
                 "r2UploadEnabled": self._r2UploadEnabled,
+                "attendanceHost": self._attendanceHost,
+                "attendancePort": self._attendancePort,
+                "attendanceIntervalHours": self._attendanceIntervalHours,
+                "attendanceScheduleEnabled": self._attendanceScheduleEnabled,
             }
             SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(SETTINGS_FILE, "w", encoding="utf-8") as handle:
@@ -323,6 +355,269 @@ class MainWindow(QObject):
             self._scheduledBackupPending = True
             self.refreshBackupDatabases()
         self.startBackupSchedule()
+
+    def appendAttendanceLog(self, message: str):
+        entry = f"{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')} - {message}"
+        self._attendanceHistory.append(entry)
+        self._attendanceHistory = self._attendanceHistory[-20:]
+        self.attendanceHistoryChanged.emit()
+        self.appendLog(f"Attendance import: {message}")
+
+    def setAttendanceStatus(self, message: str):
+        if self._attendanceStatus != message:
+            self._attendanceStatus = message
+            self.attendanceStatusChanged.emit()
+
+    def startAttendanceSchedule(self):
+        self.attendanceScheduleTimer.stop()
+        if self._attendanceScheduleEnabled:
+            self.attendanceScheduleTimer.start(
+                self._attendanceIntervalHours * 60 * 60 * 1000
+            )
+
+    @Slot()
+    def onScheduledAttendanceImport(self):
+        if self._isBusy:
+            self.appendAttendanceLog(
+                "Scheduled import skipped because another operation is running."
+            )
+            return
+        self.appendAttendanceLog("Scheduled import started.")
+        self.runAttendanceImport()
+
+    @Slot(str, str, str, str, result=bool)
+    def saveAttendanceSettings(
+        self,
+        host: str,
+        port_text: str,
+        communication_key: str,
+        interval_text: str,
+    ):
+        try:
+            settings = attendance_service.DeviceSettings(
+                host=host.strip(),
+                port=int(port_text),
+            )
+            attendance_service.validate_device_settings(settings)
+            interval_hours = int(interval_text)
+            if not 1 <= interval_hours <= 168:
+                raise attendance_service.AttendanceError(
+                    "Choose an import interval between 1 and 168 hours."
+                )
+            if communication_key:
+                attendance_service.save_communication_key(
+                    settings.host,
+                    communication_key,
+                )
+        except (ValueError, attendance_service.AttendanceError) as exc:
+            self.setAttendanceStatus(str(exc))
+            self.appendAttendanceLog(f"Settings were not saved: {exc}")
+            return False
+
+        previous_config = (
+            self._attendanceHost,
+            self._attendancePort,
+            self._attendanceIntervalHours,
+        )
+        self._attendanceHost = settings.host
+        self._attendancePort = settings.port
+        self._attendanceIntervalHours = interval_hours
+        saved = self.saveSettings()
+        if not saved:
+            (
+                self._attendanceHost,
+                self._attendancePort,
+                self._attendanceIntervalHours,
+            ) = previous_config
+            self.setAttendanceStatus("Could not save attendance settings.")
+            self.appendAttendanceLog("Device settings were not saved.")
+            self.attendanceConfigChanged.emit()
+            self.attendanceIntervalHoursChanged.emit()
+            return False
+
+        self.setAttendanceStatus(
+            "Settings saved. Test the device connection before enabling its schedule."
+        )
+        self.appendAttendanceLog(
+            f"Device settings saved for {settings.host}:{settings.port}; "
+            f"interval {interval_hours} hours."
+        )
+        self.startAttendanceSchedule()
+        self.attendanceConfigChanged.emit()
+        self.attendanceIntervalHoursChanged.emit()
+        return True
+
+    @Slot(bool)
+    def setAttendanceScheduleEnabled(self, enabled: bool):
+        enabled = bool(enabled)
+        if self._attendanceScheduleEnabled == enabled:
+            return
+        previous_enabled = self._attendanceScheduleEnabled
+        self._attendanceScheduleEnabled = enabled
+        if not self.saveSettings():
+            self._attendanceScheduleEnabled = previous_enabled
+            self.setAttendanceStatus(
+                "Could not save the automatic attendance import setting."
+            )
+            self.appendAttendanceLog("Automatic import setting was not saved.")
+            self.attendanceScheduleEnabledChanged.emit()
+            return
+
+        self.startAttendanceSchedule()
+        if enabled:
+            message = (
+                f"Automatic attendance import enabled every "
+                f"{self._attendanceIntervalHours} hours while this app is running."
+            )
+        else:
+            message = "Automatic attendance import disabled."
+        self.setAttendanceStatus(message)
+        self.appendAttendanceLog(message)
+        self.attendanceScheduleEnabledChanged.emit()
+
+    @Slot()
+    def testAttendanceConnection(self):
+        if self._isBusy:
+            self.setAttendanceStatus("Wait for the current operation to finish.")
+            return
+        self.setBusy(True)
+        self.setAttendanceStatus(
+            f"Connecting to {self._attendanceHost}:{self._attendancePort}..."
+        )
+        self.threadpool.start(Worker(self.performAttendanceConnectionTest))
+
+    def performAttendanceConnectionTest(self):
+        try:
+            settings = attendance_service.DeviceSettings(
+                self._attendanceHost,
+                self._attendancePort,
+            )
+            communication_key = attendance_service.get_communication_key(
+                settings.host
+            )
+            details = attendance_service.test_device_connection(
+                settings,
+                communication_key,
+            )
+            description = details.get("device_name") or "K90 Pro"
+            serial = details.get("serial_number")
+            suffix = f" (serial {serial})" if serial else ""
+            self.setAttendanceStatus(
+                f"Connected to {description}{suffix} at "
+                f"{settings.host}:{settings.port}."
+            )
+            self.appendAttendanceLog(
+                f"Connection test succeeded for {settings.host}:{settings.port}."
+            )
+        except Exception as exc:
+            self.setAttendanceStatus(f"Device connection failed: {exc}")
+            self.appendAttendanceLog(f"Connection test failed: {exc}")
+        finally:
+            self.setBusy(False)
+
+    @Slot()
+    def runAttendanceImport(self):
+        if self._isBusy:
+            self.setAttendanceStatus("Wait for the current operation to finish.")
+            return
+        self.setBusy(True)
+        self.setAttendanceStatus("Reading machine details, employees, and attendance...")
+        self.attendanceProgressChanged.emit(
+            5,
+            100,
+            "Reading device attendance and employee records",
+            True,
+        )
+        self.threadpool.start(Worker(self.performAttendanceImport))
+
+    def performAttendanceImport(self):
+        try:
+            settings = attendance_service.DeviceSettings(
+                self._attendanceHost,
+                self._attendancePort,
+            )
+            communication_key = attendance_service.get_communication_key(
+                settings.host
+            )
+            snapshot = attendance_service.read_device_snapshot(
+                settings,
+                communication_key,
+            )
+            self.attendanceProgressChanged.emit(
+                45,
+                100,
+                "Saving records to Firestore",
+                True,
+            )
+
+            def report_upload_progress(done: int, total: int, stage: str):
+                fraction = done / total if total else 1
+                if stage.startswith("Saving employee"):
+                    progress = 45 + round(fraction * 10)
+                else:
+                    progress = 55 + round(fraction * 44)
+                self.attendanceProgressChanged.emit(
+                    progress,
+                    100,
+                    stage,
+                    True,
+                )
+
+            counts = attendance_service.upload_snapshot(
+                snapshot,
+                core.firestore_db,
+                progress_callback=report_upload_progress,
+            )
+            self.setAttendanceTodayRows(snapshot)
+            message = (
+                f"Import complete: {counts['employees']} employee record(s) refreshed; "
+                f"{counts['attendance']} new attendance record(s) imported."
+            )
+            if snapshot.warnings:
+                self.appendAttendanceLog(
+                    "Device info warnings: " + "; ".join(snapshot.warnings)
+                )
+            self.setAttendanceStatus(message)
+            self.appendAttendanceLog(message)
+        except Exception as exc:
+            self.setAttendanceStatus(f"Attendance import failed: {exc}")
+            self.appendAttendanceLog(f"Import failed: {exc}")
+        finally:
+            self.attendanceProgressChanged.emit(0, 0, "", False)
+            self.setBusy(False)
+
+    def setAttendanceTodayRows(
+        self,
+        snapshot: attendance_service.DeviceSnapshot,
+    ):
+        employee_names = {
+            str(employee.get("employee_id", "")): str(employee.get("name", ""))
+            for employee in snapshot.employees
+        }
+        today = datetime.now().astimezone().date()
+        rows = []
+        for record in snapshot.attendance:
+            punch_time = record["punch_time"]
+            local_time = (
+                punch_time.astimezone()
+                if punch_time.tzinfo is not None
+                else punch_time.astimezone()
+            )
+            if local_time.date() != today:
+                continue
+            employee_id = str(record.get("employee_id", ""))
+            rows.append(
+                {
+                    "time": local_time.isoformat(),
+                    "employeeId": employee_id,
+                    "name": employee_names.get(employee_id, ""),
+                    "status": str(record.get("status", "")),
+                    "punch": str(record.get("punch", "")),
+                }
+            )
+        rows.sort(key=lambda row: row["time"], reverse=True)
+        self._attendanceTodayRows = rows
+        self.attendanceTodayRowsChanged.emit()
 
     @Slot()
     def refreshBackupDatabases(self):
@@ -875,6 +1170,80 @@ class MainWindow(QObject):
         return "\n".join(reversed(self._backupHistory))
 
     backupHistory = Property(str, getBackupHistory, notify=backupHistoryChanged)  # type: ignore
+
+    def getAttendanceHost(self):
+        return self._attendanceHost
+
+    attendanceHost = Property(str, getAttendanceHost, notify=attendanceConfigChanged)  # type: ignore
+
+    def getAttendancePort(self):
+        return self._attendancePort
+
+    attendancePort = Property(int, getAttendancePort, notify=attendanceConfigChanged)  # type: ignore
+
+    def getAttendanceIntervalHours(self):
+        return self._attendanceIntervalHours
+
+    attendanceIntervalHours = Property(
+        int,
+        getAttendanceIntervalHours,
+        notify=attendanceIntervalHoursChanged,
+    )  # type: ignore
+
+    def getAttendanceScheduleEnabled(self):
+        return self._attendanceScheduleEnabled
+
+    attendanceScheduleEnabled = Property(
+        bool,
+        getAttendanceScheduleEnabled,
+        setAttendanceScheduleEnabled,
+        notify=attendanceScheduleEnabledChanged,
+    )  # type: ignore
+
+    def getAttendanceStatus(self):
+        return self._attendanceStatus
+
+    attendanceStatus = Property(
+        str,
+        getAttendanceStatus,
+        notify=attendanceStatusChanged,
+    )  # type: ignore
+
+    def getAttendanceHistory(self):
+        return "\n".join(reversed(self._attendanceHistory))
+
+    attendanceHistory = Property(
+        str,
+        getAttendanceHistory,
+        notify=attendanceHistoryChanged,
+    )  # type: ignore
+
+    def getAttendanceTodayRows(self):
+        return self._attendanceTodayRows
+
+    attendanceTodayRows = Property(
+        "QVariantList",
+        getAttendanceTodayRows,
+        notify=attendanceTodayRowsChanged,
+    )  # type: ignore
+
+    def getAttendanceTodayCount(self):
+        return len(self._attendanceTodayRows)
+
+    attendanceTodayCount = Property(
+        int,
+        getAttendanceTodayCount,
+        notify=attendanceTodayRowsChanged,
+    )  # type: ignore
+
+    def getAttendanceKeySaved(self):
+        return attendance_service.has_communication_key(self._attendanceHost)
+
+    attendanceKeySaved = Property(
+        bool,
+        getAttendanceKeySaved,
+        notify=attendanceConfigChanged,
+    )  # type: ignore
 
     def getR2AccountId(self):
         return self._r2AccountId
