@@ -25,12 +25,23 @@ Window {
     property string toastMessage: ""
     property color toastColor: "#31525B"
     property bool toastVisible: false
+    property var expandedBackupCompanies: ({})
+    property int r2TransferDone: 0
+    property int r2TransferTotal: 0
+    property string r2TransferFile: ""
+    property bool r2TransferActive: false
 
     function showToast(message, tone) {
         toastMessage = message
         toastColor = tone === "success" ? "#2E6F40" : tone === "error" ? "#A23B2A" : "#31525B"
         toastVisible = true
         toastTimer.restart()
+    }
+
+    function toggleBackupCompanyExpanded(companyCode) {
+        const updated = Object.assign({}, expandedBackupCompanies)
+        updated[companyCode] = !updated[companyCode]
+        expandedBackupCompanies = updated
     }
 
     component AppButton: Rectangle {
@@ -220,7 +231,7 @@ Window {
                         }
 
                         Text {
-                            text: "Desktop sync control panel"
+                            text: "Price-list sync and SQL backup control panel"
                             font.pixelSize: 14
                             font.family: "Poppins"
                             color: "#31525B"
@@ -313,9 +324,626 @@ Window {
                 }
             
 
+            TabBar {
+                id: featureTabs
+                Layout.fillWidth: true
+                currentIndex: 0
+
+                background: Rectangle {
+                    radius: 14
+                    color: "#102542"
+                }
+
+                TabButton {
+                    text: "Price List Sync"
+                    contentItem: Text {
+                        text: parent.text
+                        color: parent.checked ? "#102542" : "#F7F3E9"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        font.family: "Poppins Medium"
+                    }
+                    background: Rectangle {
+                        radius: 12
+                        color: parent.checked ? "#F7F3E9" : "transparent"
+                    }
+                }
+
+                TabButton {
+                    text: "SQL Backups"
+                    contentItem: Text {
+                        text: parent.text
+                        color: parent.checked ? "#102542" : "#F7F3E9"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        font.family: "Poppins Medium"
+                    }
+                    background: Rectangle {
+                        radius: 12
+                        color: parent.checked ? "#F7F3E9" : "transparent"
+                    }
+                }
+            }
+
+            ColumnLayout {
+                id: backupPage
+                visible: featureTabs.currentIndex === 1
+                Layout.fillWidth: true
+                spacing: 20
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: 22
+                    color: window.panel
+                    implicitHeight: backupContent.implicitHeight + 48
+
+                    ColumnLayout {
+                        id: backupContent
+                        anchors.fill: parent
+                        anchors.margins: 24
+                        spacing: 14
+
+                        Text {
+                            text: "SQL Server Express Backups"
+                            font.pixelSize: 22
+                            font.family: "Poppins SemiBold"
+                            color: "#102542"
+                        }
+
+                        Text {
+                            text: "Select one or more company/year databases. Each backup is a complete SQL database backup."
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: 12
+                            font.family: "Poppins"
+                            color: "#46616B"
+                            Layout.fillWidth: true
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            TextField {
+                                id: backupDestinationField
+                                Layout.fillWidth: true
+                                text: backend.backupDestination
+                                placeholderText: "\\\\HomeServer\\SQLBackups"
+                                color: window.ink
+                                placeholderTextColor: "#7A8B92"
+                                font.pixelSize: 12
+                                font.family: "Poppins"
+                                onEditingFinished: backend.backupDestination = text
+
+                                background: Rectangle {
+                                    radius: 14
+                                    color: "white"
+                                    border.color: "#C2CFD3"
+                                    border.width: 1
+                                }
+                            }
+
+                            AppButton {
+                                text: "Check Share"
+                                enabled: !backend.isBusy
+                                Layout.preferredWidth: 140
+                                onClicked: {
+                                    backend.backupDestination = backupDestinationField.text
+                                    backend.checkBackupDestination()
+                                }
+                                font.family: "Poppins Medium"
+                                baseColor: "#DDEAF0"
+                                pressColor: "#C8DCE7"
+                                textColor: "#102542"
+                                borderColor: "#B9CCD5"
+                                accentColor: "#31525B"
+                            }
+                        }
+
+                        Text {
+                            text: "Use a UNC share. The share must exist and allow the SQL Express service account to write; a completed backup verifies write access."
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: 11
+                            font.family: "Poppins"
+                            color: "#5F6B6D"
+                            Layout.fillWidth: true
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: 18
+                            color: window.panelAlt
+                            implicitHeight: r2SettingsContent.implicitHeight + 36
+
+                            ColumnLayout {
+                                id: r2SettingsContent
+                                anchors.fill: parent
+                                anchors.margins: 18
+                                spacing: 10
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 12
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Text {
+                                            text: "Cloudflare R2 Upload"
+                                            font.pixelSize: 17
+                                            font.family: "Poppins SemiBold"
+                                            color: "#102542"
+                                        }
+                                        Text {
+                                            text: r2UploadSwitch.checked
+                                                  ? "Enabled for future backups"
+                                                  : "Disabled"
+                                            font.pixelSize: 11
+                                            font.family: "Poppins"
+                                            color: "#46616B"
+                                        }
+                                    }
+
+                                    Switch {
+                                        id: r2UploadSwitch
+                                        objectName: "r2UploadSwitch"
+                                        checked: backend.r2UploadEnabled
+                                        enabled: !backend.isBusy
+                                        onToggled: backend.r2UploadEnabled = checked
+                                    }
+                                }
+
+                                Text {
+                                    text: "Set up and save your credentials below, test the connection, then switch uploads on. Each completed backup is uploaded to your private bucket. The computer running this app must be able to read the backup file."
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 11
+                                    font.family: "Poppins"
+                                    color: "#46616B"
+                                    Layout.fillWidth: true
+                                }
+
+                                ColumnLayout {
+                                    visible: window.r2TransferActive
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    Text {
+                                        text: "Uploading " + window.r2TransferFile + ": "
+                                              + (window.r2TransferTotal > 0
+                                                 ? Math.floor(
+                                                       window.r2TransferDone
+                                                       * 100
+                                                       / window.r2TransferTotal
+                                                   ) + "%"
+                                                 : "starting")
+                                        font.pixelSize: 11
+                                        font.family: "Poppins Medium"
+                                        color: "#31525B"
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideMiddle
+                                    }
+                                    ProgressBar {
+                                        Layout.fillWidth: true
+                                        from: 0
+                                        to: Math.max(window.r2TransferTotal, 1)
+                                        value: Math.min(
+                                            window.r2TransferDone,
+                                            Math.max(window.r2TransferTotal, 1)
+                                        )
+                                        indeterminate: window.r2TransferTotal <= 0
+                                    }
+                                }
+
+                                Text {
+                                    text: "1. Cloudflare Account ID"
+                                    font.pixelSize: 12
+                                    font.family: "Poppins Medium"
+                                    color: "#31525B"
+                                }
+                                TextField {
+                                    id: r2AccountField
+                                    Layout.fillWidth: true
+                                    text: backend.r2AccountId
+                                    placeholderText: "32-character ID from Cloudflare dashboard"
+                                    color: window.ink
+                                    font.pixelSize: 12
+                                    font.family: "Poppins"
+                                    background: Rectangle {
+                                        radius: 12
+                                        color: "white"
+                                        border.color: "#C2CFD3"
+                                        border.width: 1
+                                    }
+                                }
+                                Text {
+                                    text: "Find it in Cloudflare Dashboard > Account home. This is not an API token."
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 10
+                                    font.family: "Poppins"
+                                    color: "#5F6B6D"
+                                    Layout.fillWidth: true
+                                }
+
+                                Text {
+                                    text: "2. R2 Bucket Name"
+                                    font.pixelSize: 12
+                                    font.family: "Poppins Medium"
+                                    color: "#31525B"
+                                }
+                                TextField {
+                                    id: r2BucketField
+                                    Layout.fillWidth: true
+                                    text: backend.r2BucketName
+                                    placeholderText: "Exact name of the R2 bucket you created"
+                                    color: window.ink
+                                    font.pixelSize: 12
+                                    font.family: "Poppins"
+                                    background: Rectangle {
+                                        radius: 12
+                                        color: "white"
+                                        border.color: "#C2CFD3"
+                                        border.width: 1
+                                    }
+                                }
+
+                                Text {
+                                    text: "Find it in Cloudflare Dashboard > R2 Object Storage > Overview."
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 10
+                                    font.family: "Poppins"
+                                    color: "#5F6B6D"
+                                    Layout.fillWidth: true
+                                }
+
+                                Text {
+                                    text: "3. R2 Access Key ID"
+                                    font.pixelSize: 12
+                                    font.family: "Poppins Medium"
+                                    color: "#31525B"
+                                }
+                                TextField {
+                                    id: r2AccessKeyField
+                                    Layout.fillWidth: true
+                                    text: backend.r2AccessKeyId
+                                    placeholderText: "Access Key ID from an R2 API token"
+                                    color: window.ink
+                                    font.pixelSize: 12
+                                    font.family: "Poppins"
+                                    background: Rectangle {
+                                        radius: 12
+                                        color: "white"
+                                        border.color: "#C2CFD3"
+                                        border.width: 1
+                                    }
+                                }
+
+                                Text {
+                                    text: "Create a bucket-scoped R2 API token with Object Read & Write permissions. Use its Access Key ID here—not your Cloudflare Global API Key."
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 10
+                                    font.family: "Poppins"
+                                    color: "#5F6B6D"
+                                    Layout.fillWidth: true
+                                }
+
+                                Text {
+                                    text: "4. R2 Secret Access Key"
+                                    font.pixelSize: 12
+                                    font.family: "Poppins Medium"
+                                    color: "#31525B"
+                                }
+                                TextField {
+                                    id: r2SecretField
+                                    Layout.fillWidth: true
+                                    placeholderText: "Secret Access Key shown when creating the R2 token"
+                                    echoMode: TextInput.Password
+                                    color: window.ink
+                                    font.pixelSize: 12
+                                    font.family: "Poppins"
+                                    background: Rectangle {
+                                        radius: 12
+                                        color: "white"
+                                        border.color: "#C2CFD3"
+                                        border.width: 1
+                                    }
+                                }
+
+                                Text {
+                                    text: "The secret is shown only once by Cloudflare. It is saved in Windows Credential Manager, not in the app settings. Leave blank to keep a previously saved secret for this Access Key ID."
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 10
+                                    font.family: "Poppins"
+                                    color: "#5F6B6D"
+                                    Layout.fillWidth: true
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+
+                                    AppButton {
+                                        text: "Save R2 Settings"
+                                        enabled: !backend.isBusy
+                                        Layout.fillWidth: true
+                                        onClicked: {
+                                            backend.saveR2Settings(
+                                                r2AccountField.text,
+                                                r2BucketField.text,
+                                                r2AccessKeyField.text,
+                                                r2SecretField.text
+                                            )
+                                            if (backend.backupStatus.indexOf(
+                                                "Cloudflare R2 settings saved."
+                                            ) === 0) {
+                                                r2SecretField.clear()
+                                            }
+                                        }
+                                        font.family: "Poppins Medium"
+                                        baseColor: "#31525B"
+                                        accentColor: "#8CC6D2"
+                                    }
+
+                                    AppButton {
+                                        text: "Test R2 Connection"
+                                        enabled: !backend.isBusy
+                                        Layout.fillWidth: true
+                                        onClicked: backend.testR2Connection()
+                                        font.family: "Poppins Medium"
+                                        textColor: "#102542"
+                                        baseColor: "#DDEAF0"
+                                        borderColor: "#B9CCD5"
+                                        accentColor: "#31525B"
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    radius: 12
+                                    color: "#E5E9D7"
+                                    implicitHeight: r2StatusText.implicitHeight + 20
+                                    Text {
+                                        id: r2StatusText
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        text: backend.backupStatus
+                                        wrapMode: Text.WordWrap
+                                        font.pixelSize: 11
+                                        font.family: "Poppins Medium"
+                                        color: backend.backupStatus.indexOf("failed") >= 0
+                                               || backend.backupStatus.indexOf("required") >= 0
+                                               || backend.backupStatus.indexOf("incomplete") >= 0
+                                               || backend.backupStatus.indexOf("Could not") >= 0
+                                               ? "#A23B2A" : "#102542"
+                                    }
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 12
+
+                            Text {
+                                text: "Daily backup"
+                                font.pixelSize: 14
+                                font.family: "Poppins Medium"
+                                color: "#102542"
+                            }
+
+                            Switch {
+                                checked: backend.backupScheduleEnabled
+                                onToggled: backend.backupScheduleEnabled = checked
+                            }
+
+                            Text {
+                                text: "at"
+                                font.pixelSize: 12
+                                font.family: "Poppins"
+                                color: "#31525B"
+                            }
+
+                            TextField {
+                                id: backupTimeField
+                                Layout.preferredWidth: 100
+                                text: backend.backupScheduleTime
+                                inputMask: "00:00;_"
+                                enabled: backend.backupScheduleEnabled
+                                color: window.ink
+                                font.pixelSize: 12
+                                font.family: "Poppins"
+                                onEditingFinished: {
+                                    let requestedTime = text
+                                    backend.backupScheduleTime = requestedTime
+                                    if (backend.backupScheduleTime !== requestedTime) {
+                                        text = backend.backupScheduleTime
+                                    }
+                                }
+
+                                background: Rectangle {
+                                    radius: 12
+                                    color: "white"
+                                    border.color: "#C2CFD3"
+                                    border.width: 1
+                                }
+                            }
+
+                            Text {
+                                text: "local time"
+                                font.pixelSize: 12
+                                font.family: "Poppins"
+                                color: "#31525B"
+                            }
+
+                            Item { Layout.fillWidth: true }
+                        }
+
+                        Text {
+                            text: "Runs only while this app is running in the system tray. If the app is not running at the scheduled time, that day is skipped."
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: 11
+                            font.family: "Poppins"
+                            color: "#5F6B6D"
+                            Layout.fillWidth: true
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 12
+
+                            AppButton {
+                                text: backend.isBusy ? "Working..." : "Find Companies / Years"
+                                enabled: !backend.isBusy
+                                Layout.fillWidth: true
+                                onClicked: backend.refreshBackupDatabases()
+                                font.family: "Poppins Medium"
+                                baseColor: "#31525B"
+                                accentColor: "#8CC6D2"
+                            }
+
+                            AppButton {
+                                text: backend.isBusy ? "Backing Up..." : "Back Up Selected"
+                                enabled: !backend.isBusy
+                                Layout.fillWidth: true
+                                onClicked: {
+                                    backend.backupDestination = backupDestinationField.text
+                                    backend.runBackupNow()
+                                }
+                                font.family: "Poppins Medium"
+                                baseColor: "#2E6F40"
+                                pressColor: "#245734"
+                                accentColor: "#B7E1C0"
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: 14
+                            color: window.panelAlt
+                            implicitHeight: 54
+
+                            Text {
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                text: backend.backupStatus
+                                wrapMode: Text.WordWrap
+                                font.pixelSize: 12
+                                font.family: "Poppins Medium"
+                                color: backend.backupStatus.indexOf("failed") >= 0
+                                       || backend.backupStatus.indexOf("cannot") >= 0
+                                       ? "#A23B2A" : "#102542"
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+
+                        Text {
+                            text: "Available company/year databases"
+                            font.pixelSize: 15
+                            font.family: "Poppins SemiBold"
+                            color: "#102542"
+                        }
+
+                        ScrollView {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 190
+                            clip: true
+
+                            ColumnLayout {
+                                width: backupDatabaseScroll.availableWidth
+                                spacing: 4
+
+                                Repeater {
+                                    model: backend.backupCompanies
+
+                                    ColumnLayout {
+                                        id: companyItem
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        property bool expanded: false
+                                        property var companyData: modelData
+                                        spacing: 2
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 6
+
+                                            ToolButton {
+                                                text: window.expandedBackupCompanies[
+                                                    companyItem.companyData.companyCode
+                                                ] ? "-" : "+"
+                                                onClicked: window.toggleBackupCompanyExpanded(
+                                                    companyItem.companyData.companyCode
+                                                )
+                                            }
+
+                                            CheckBox {
+                                                id: companyCheckBox
+                                                Layout.fillWidth: true
+                                                text: companyItem.companyData.companyName + " ("
+                                                      + companyItem.companyData.companyCode + ")"
+                                                tristate: true
+                                                checkState: companyItem.companyData.selected
+                                                            ? Qt.Checked
+                                                            : companyItem.companyData.partiallySelected
+                                                              ? Qt.PartiallyChecked
+                                                              : Qt.Unchecked
+                                                font.family: "Poppins Medium"
+                                                onClicked: backend.setBackupCompanySelected(
+                                                    companyItem.companyData.companyCode,
+                                                    !companyItem.companyData.selected
+                                                        || companyItem.companyData.partiallySelected
+                                                )
+                                            }
+                                        }
+
+                                        ColumnLayout {
+                                            visible: window.expandedBackupCompanies[
+                                                companyItem.companyData.companyCode
+                                            ] === true
+                                            Layout.fillWidth: true
+                                            Layout.leftMargin: 38
+                                            spacing: 0
+
+                                            Repeater {
+                                                model: companyItem.companyData.financialYears
+
+                                                CheckBox {
+                                                    required property var modelData
+                                                    Layout.fillWidth: true
+                                                    text: "FY " + modelData.financialYear
+                                                          + "  -  " + modelData.size
+                                                    checked: modelData.selected
+                                                    font.family: "Poppins"
+                                                    onToggled: backend.setBackupDatabaseSelected(
+                                                        modelData.key,
+                                                        checked
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            id: backupDatabaseScroll
+                        }
+
+                        TextEdit {
+                            text: backend.backupHistory
+                            readOnly: true
+                            selectByMouse: true
+                            wrapMode: TextEdit.WordWrap
+                            Layout.preferredHeight: Math.max(contentHeight, 24)
+                            font.pixelSize: 11
+                            font.family: "Poppins"
+                            color: "#46616B"
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 20
+                visible: featureTabs.currentIndex === 0
 
                 Rectangle {
                     Layout.fillWidth: true
@@ -557,6 +1185,7 @@ Window {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 20
+                visible: featureTabs.currentIndex === 0
 
                 Rectangle {
                     Layout.fillWidth: true
@@ -770,17 +1399,37 @@ Window {
                 color: "#0F2233"
                 implicitHeight: 260
                 Layout.bottomMargin: 6
+                visible: featureTabs.currentIndex === 0
 
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 20
                     spacing: 10
 
-                    Text {
-                        text: "Activity Log"
-                        font.pixelSize: 20
-                        font.family: "Poppins SemiBold"
-                        color: "#F7F3E9"
+                    RowLayout {
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "Activity Log"
+                            font.pixelSize: 20
+                            font.family: "Poppins SemiBold"
+                            color: "#F7F3E9"
+                            Layout.fillWidth: true
+                        }
+
+                        AppButton {
+                            text: "Copy Logs"
+                            buttonHeight: 34
+                            Layout.preferredWidth: 120
+                            onClicked: {
+                                backend.copyLogs()
+                                window.showToast("Activity logs copied to clipboard.", "success")
+                            }
+                            font.family: "Poppins Medium"
+                            baseColor: "#31525B"
+                            pressColor: "#28464D"
+                            accentColor: "#8CC6D2"
+                        }
                     }
 
                     Flickable {
@@ -791,7 +1440,7 @@ Window {
                         boundsBehavior: Flickable.StopAtBounds
                         flickableDirection: Flickable.VerticalFlick
                         contentWidth: width
-                        contentHeight: Math.max(height, logText.implicitHeight)
+                        contentHeight: Math.max(height, logText.height)
 
                         function scrollToBottom() {
                             contentY = Math.max(0, contentHeight - height)
@@ -814,14 +1463,17 @@ Window {
                             }
                         }
 
-                        Text {
+                        TextEdit {
                             id: logText
                             width: logFlick.width
                             text: backend.logs
-                            wrapMode: Text.Wrap
+                            readOnly: true
+                            wrapMode: TextEdit.Wrap
+                            height: Math.max(contentHeight, 1)
                             font.pixelSize: 12
                             font.family: "Poppins"
                             color: "#E6EEE8"
+                            selectByMouse: true
 
                             onTextChanged: {
                                 Qt.callLater(function() {
@@ -840,6 +1492,7 @@ Window {
                 font.pixelSize: 11
                 font.family: "Poppins"
                 color: "#D5DDD9"
+                visible: featureTabs.currentIndex === 0
             }
         }
     }
@@ -888,6 +1541,37 @@ Window {
             if (!dbDirty) {
                 dbNameField.text = backend.dbName
             }
+        }
+
+        function onBackupDestinationChanged() {
+            if (!backupDestinationField.activeFocus) {
+                backupDestinationField.text = backend.backupDestination
+            }
+        }
+
+        function onBackupScheduleTimeChanged() {
+            if (!backupTimeField.activeFocus) {
+                backupTimeField.text = backend.backupScheduleTime
+            }
+        }
+
+        function onR2SettingsChanged() {
+            if (!r2AccountField.activeFocus) {
+                r2AccountField.text = backend.r2AccountId
+            }
+            if (!r2BucketField.activeFocus) {
+                r2BucketField.text = backend.r2BucketName
+            }
+            if (!r2AccessKeyField.activeFocus) {
+                r2AccessKeyField.text = backend.r2AccessKeyId
+            }
+        }
+
+        function onR2TransferChanged(done, total, fileName, active) {
+            window.r2TransferDone = done
+            window.r2TransferTotal = total
+            window.r2TransferFile = fileName
+            window.r2TransferActive = active
         }
     }
 }

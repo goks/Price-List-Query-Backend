@@ -22,6 +22,8 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from app_version import APP_VERSION
 import core
+import backup_service
+import r2_service
 
 IST = pytz.timezone("Asia/Calcutta")
 APP_NAME = "GA Price Uploader"
@@ -115,6 +117,15 @@ class MainWindow(QObject):
     autostartEnabledChanged = Signal()  # type: ignore
     dbServerChanged = Signal()  # type: ignore
     dbNameChanged = Signal()  # type: ignore
+    backupDatabasesChanged = Signal()  # type: ignore
+    backupDestinationChanged = Signal()  # type: ignore
+    backupScheduleEnabledChanged = Signal()  # type: ignore
+    backupScheduleTimeChanged = Signal()  # type: ignore
+    backupStatusChanged = Signal()  # type: ignore
+    backupHistoryChanged = Signal()  # type: ignore
+    r2SettingsChanged = Signal()  # type: ignore
+    r2UploadEnabledChanged = Signal()  # type: ignore
+    r2TransferChanged = Signal(int, int, str, bool)
     appVersionChanged = Signal()  # type: ignore
     latestVersionChanged = Signal()  # type: ignore
     updateStatusChanged = Signal()  # type: ignore
@@ -136,6 +147,19 @@ class MainWindow(QObject):
         self._autostartEnabled = True
         self._dbServer = DEFAULT_DB_SERVER
         self._dbName = DEFAULT_DB_NAME
+        self._backupDatabases: list[backup_service.BackupDatabase] = []
+        self._selectedBackupDatabases: set[str] = set()
+        self._backupDestination = ""
+        self._backupScheduleEnabled = False
+        self._backupScheduleTime = "02:00"
+        self._backupStatus = "Refresh the database list to choose company years."
+        self._backupHistory: list[str] = []
+        self._scheduledBackupPending = False
+        self._r2AccountId = ""
+        self._r2BucketName = ""
+        self._r2AccessKeyId = ""
+        self._r2Prefix = "sql-backups"
+        self._r2UploadEnabled = False
 
         self._appVersion = APP_VERSION
         self._latestVersion = APP_VERSION
@@ -151,6 +175,10 @@ class MainWindow(QObject):
         self.autoUpdateTimer.timeout.connect(self.onAutoUpdateTrigger)
         if self._autoUpdateEnabled:
             self.startAutoUpdate()
+        self.backupScheduleTimer = QTimer()
+        self.backupScheduleTimer.setSingleShot(True)
+        self.backupScheduleTimer.timeout.connect(self.onScheduledBackupTrigger)
+        self.startBackupSchedule()
 
     def getAutostartCommand(self) -> str:
         if getattr(sys, "frozen", False):
@@ -177,12 +205,27 @@ class MainWindow(QObject):
                 self._autostartEnabled = bool(settings.get("autostart", True))
                 self._dbServer = str(settings.get("dbServer", DEFAULT_DB_SERVER))
                 self._dbName = str(settings.get("dbName", DEFAULT_DB_NAME))
+                self._backupDestination = str(settings.get("backupDestination", ""))
+                self._backupScheduleEnabled = bool(settings.get("backupScheduleEnabled", False))
+                self._r2AccountId = str(settings.get("r2AccountId", ""))
+                self._r2BucketName = str(settings.get("r2BucketName", ""))
+                self._r2AccessKeyId = str(settings.get("r2AccessKeyId", ""))
+                self._r2Prefix = str(settings.get("r2Prefix", "sql-backups"))
+                self._r2UploadEnabled = bool(settings.get("r2UploadEnabled", False))
+                schedule_time = str(settings.get("backupScheduleTime", "02:00"))
+                if re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", schedule_time):
+                    self._backupScheduleTime = schedule_time
+                selected_databases = settings.get("selectedBackupDatabases", [])
+                if isinstance(selected_databases, list):
+                    self._selectedBackupDatabases = {
+                        str(name) for name in selected_databases if isinstance(name, str)
+                    }
                 if source_path == LEGACY_SETTINGS_FILE and source_path != SETTINGS_FILE:
                     self.saveSettings()
         except Exception as exc:
             print(f"Error loading settings: {exc}")
 
-    def saveSettings(self):
+    def saveSettings(self) -> bool:
         try:
             settings = {
                 "enabled": self._autoUpdateEnabled,
@@ -190,12 +233,25 @@ class MainWindow(QObject):
                 "autostart": self._autostartEnabled,
                 "dbServer": self._dbServer,
                 "dbName": self._dbName,
+                "backupDestination": self._backupDestination,
+                "backupScheduleEnabled": self._backupScheduleEnabled,
+                "backupScheduleTime": self._backupScheduleTime,
+                "selectedBackupDatabases": sorted(self._selectedBackupDatabases),
+                "r2AccountId": self._r2AccountId,
+                "r2BucketName": self._r2BucketName,
+                "r2AccessKeyId": self._r2AccessKeyId,
+                "r2Prefix": self._r2Prefix,
+                "r2UploadEnabled": self._r2UploadEnabled,
             }
             SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(SETTINGS_FILE, "w", encoding="utf-8") as handle:
                 json.dump(settings, handle, indent=2)
-        except Exception as exc:
-            print(f"Error saving settings: {exc}")
+            return True
+        except (OSError, TypeError, ValueError) as exc:
+            message = f"Could not save settings: {exc}"
+            self.appendLog(message)
+            self.setBackupStatus(message)
+            return False
 
     def setUpdateState(
         self,
@@ -226,6 +282,382 @@ class MainWindow(QObject):
     def stopAutoUpdate(self):
         self.autoUpdateTimer.stop()
         self.appendLog("Auto-sync disabled")
+
+    def appendBackupLog(self, message: str):
+        entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}"
+        self._backupHistory.append(entry)
+        self._backupHistory = self._backupHistory[-20:]
+        self.backupHistoryChanged.emit()
+        self.appendLog(f"Backup: {message}")
+
+    def setBackupStatus(self, message: str):
+        if self._backupStatus != message:
+            self._backupStatus = message
+            self.backupStatusChanged.emit()
+
+    def startBackupSchedule(self):
+        self.backupScheduleTimer.stop()
+        if not self._backupScheduleEnabled:
+            return
+
+        try:
+            interval_ms = backup_service.milliseconds_until_daily_time(
+                datetime.now().astimezone(),
+                self._backupScheduleTime,
+            )
+        except backup_service.BackupError as exc:
+            self.setBackupStatus(str(exc))
+            return
+
+        self.backupScheduleTimer.start(interval_ms)
+
+    @Slot()
+    def onScheduledBackupTrigger(self):
+        self.appendBackupLog(
+            f"Daily backup schedule triggered at {datetime.now().astimezone().strftime('%H:%M')}."
+        )
+        if self._isBusy:
+            self.appendBackupLog("Scheduled backup skipped because another operation is running.")
+            self.setBackupStatus("Scheduled backup skipped because another operation is running.")
+        else:
+            self._scheduledBackupPending = True
+            self.refreshBackupDatabases()
+        self.startBackupSchedule()
+
+    @Slot()
+    def refreshBackupDatabases(self):
+        if self._isBusy:
+            self.setBackupStatus("Wait for the current database operation to finish.")
+            return
+        self.setBackupStatus("Reading company/year databases...")
+        self.setBusy(True)
+        self.threadpool.start(Worker(self.performBackupDiscovery))
+
+    def performBackupDiscovery(self):
+        discovery_succeeded = False
+        try:
+            databases, issues = backup_service.discover_databases(self._dbServer)
+            self._backupDatabases = databases
+            discovery_succeeded = True
+            self.backupDatabasesChanged.emit()
+            if issues:
+                self.setBackupStatus(
+                    f"Found {len(databases)} backup database(s) with "
+                    f"{len(issues)} discovery issue(s); see backup history."
+                )
+                for issue in issues:
+                    self.appendBackupLog(f"Discovery warning: {issue}")
+            else:
+                self.setBackupStatus(
+                    f"Found {len(databases)} company/year database(s)."
+                )
+            self.appendBackupLog(
+                f"Database discovery completed: {len(databases)} candidate(s)."
+            )
+        except Exception as exc:
+            self.setBackupStatus(f"Database discovery failed: {exc}")
+            self.appendBackupLog(f"Database discovery failed: {exc}")
+        finally:
+            self.setBusy(False)
+            if self._scheduledBackupPending:
+                self._scheduledBackupPending = False
+                if discovery_succeeded:
+                    self.runBackupNow()
+
+    @Slot(str, bool)
+    def setBackupDatabaseSelected(self, database_name: str, selected: bool):
+        if not any(item.name == database_name for item in self._backupDatabases):
+            self.setBackupStatus("Refresh the database list before changing selections.")
+            return
+        if selected:
+            self._selectedBackupDatabases.add(database_name)
+        else:
+            self._selectedBackupDatabases.discard(database_name)
+        self.saveSettings()
+        self.backupDatabasesChanged.emit()
+
+    @Slot(str, bool)
+    def setBackupCompanySelected(self, company_code: str, selected: bool):
+        company_databases = [
+            item for item in self._backupDatabases
+            if item.company_code == company_code
+        ]
+        if not company_databases:
+            self.setBackupStatus("Refresh the database list before changing selections.")
+            return
+        for database in company_databases:
+            if selected:
+                self._selectedBackupDatabases.add(database.name)
+            else:
+                self._selectedBackupDatabases.discard(database.name)
+        self.saveSettings()
+        self.backupDatabasesChanged.emit()
+
+    @Slot()
+    def checkBackupDestination(self):
+        if self._isBusy:
+            self.setBackupStatus("Wait for the current database operation to finish.")
+            return
+        if not self._backupDestination.strip():
+            self.setBackupStatus("Enter a HomeServer UNC folder path first.")
+            return
+        self.setBackupStatus("Checking destination from the SQL Server host...")
+        self.setBusy(True)
+        server = self._dbServer
+        destination = self._backupDestination
+        self.threadpool.start(
+            Worker(lambda: self.performBackupDestinationCheck(server, destination))
+        )
+
+    def performBackupDestinationCheck(self, server: str, destination: str):
+        try:
+            message = backup_service.check_destination(server, destination)
+            self.setBackupStatus(message)
+            self.appendBackupLog(f"Destination check: {message}")
+        except Exception as exc:
+            self.setBackupStatus(f"Destination check failed: {exc}")
+            self.appendBackupLog(f"Destination check failed: {exc}")
+        finally:
+            self.setBusy(False)
+
+    def getR2Settings(self) -> r2_service.R2Settings:
+        return r2_service.R2Settings(
+            account_id=self._r2AccountId,
+            bucket_name=self._r2BucketName,
+            access_key_id=self._r2AccessKeyId,
+            prefix=self._r2Prefix,
+        )
+
+    @Slot(str, str, str, str)
+    def saveR2Settings(
+        self,
+        account_id: str,
+        bucket_name: str,
+        access_key_id: str,
+        secret_access_key: str,
+    ):
+        account_id = str(account_id).strip()
+        bucket_name = str(bucket_name).strip()
+        access_key_id = str(access_key_id).strip()
+        secret_access_key = str(secret_access_key)
+        if not account_id or not bucket_name or not access_key_id:
+            self.setBackupStatus("R2 account ID, bucket name, and access key ID are required.")
+            return
+
+        try:
+            settings = r2_service.R2Settings(
+                account_id=account_id,
+                bucket_name=bucket_name,
+                access_key_id=access_key_id,
+                prefix=self._r2Prefix,
+            )
+            r2_service.validate_settings(settings)
+            if secret_access_key:
+                r2_service.save_secret(access_key_id, secret_access_key)
+            else:
+                r2_service.get_secret(access_key_id)
+        except r2_service.R2Error as exc:
+            self.setBackupStatus(str(exc))
+            self.appendBackupLog(f"R2 settings were not saved: {exc}")
+            return
+
+        self._r2AccountId = account_id
+        self._r2BucketName = bucket_name
+        self._r2AccessKeyId = access_key_id
+        saved = self.saveSettings()
+        self.r2SettingsChanged.emit()
+        if saved:
+            self.setBackupStatus(
+                "Cloudflare R2 settings saved. The secret is stored in Windows Credential Manager."
+            )
+            self.appendBackupLog("Cloudflare R2 settings saved.")
+
+    @Slot()
+    def testR2Connection(self):
+        if self._isBusy:
+            self.setBackupStatus("Wait for the current database operation to finish.")
+            return
+        try:
+            settings = self.getR2Settings()
+            secret = r2_service.get_secret(settings.access_key_id)
+        except r2_service.R2Error as exc:
+            self.setBackupStatus(str(exc))
+            return
+
+        self.setBackupStatus("Testing Cloudflare R2 connection...")
+        self.setBusy(True)
+        self.threadpool.start(
+            Worker(lambda: self.performR2ConnectionTest(settings, secret))
+        )
+
+    def performR2ConnectionTest(
+        self,
+        settings: r2_service.R2Settings,
+        secret_access_key: str,
+    ):
+        try:
+            message = r2_service.test_connection(settings, secret_access_key)
+            self.setBackupStatus(message)
+            self.appendBackupLog(message)
+        except Exception as exc:
+            self.setBackupStatus(f"R2 connection test failed: {exc}")
+            self.appendBackupLog(f"R2 connection test failed: {exc}")
+        finally:
+            self.setBusy(False)
+
+    @Slot(bool)
+    def setR2UploadEnabled(self, enabled: bool):
+        enabled = bool(enabled)
+        if self._r2UploadEnabled != enabled:
+            self._r2UploadEnabled = enabled
+            self.saveSettings()
+            self.r2UploadEnabledChanged.emit()
+            if not enabled:
+                self.setBackupStatus("Cloudflare R2 uploads are disabled.")
+                self.appendBackupLog("Cloudflare R2 upload disabled.")
+                return
+
+            try:
+                settings = self.getR2Settings()
+                r2_service.validate_settings(settings)
+                r2_service.get_secret(settings.access_key_id)
+            except r2_service.R2Error as exc:
+                message = (
+                    "Cloudflare R2 upload is switched on, but setup is incomplete: "
+                    f"{exc} Save your R2 settings before starting a backup."
+                )
+                self.setBackupStatus(message)
+                self.appendBackupLog(message)
+                return
+
+            self.setBackupStatus("Cloudflare R2 upload is enabled.")
+            self.appendBackupLog("Cloudflare R2 upload enabled.")
+
+    @Slot()
+    def runBackupNow(self):
+        if self._isBusy:
+            self.setBackupStatus("Wait for the current database operation to finish.")
+            return
+        selected = [
+            item for item in self._backupDatabases
+            if item.name in self._selectedBackupDatabases
+        ]
+        if not selected:
+            self.setBackupStatus("Select at least one company/year database.")
+            return
+        if not self._backupDestination.strip():
+            self.setBackupStatus("Enter a HomeServer UNC folder path first.")
+            return
+
+        r2_settings: Optional[r2_service.R2Settings] = None
+        r2_secret: Optional[str] = None
+        if self._r2UploadEnabled:
+            try:
+                r2_settings = self.getR2Settings()
+                r2_secret = r2_service.get_secret(r2_settings.access_key_id)
+                r2_service.validate_settings(r2_settings)
+            except r2_service.R2Error as exc:
+                self.setBackupStatus(f"R2 upload is enabled but not configured: {exc}")
+                self.appendBackupLog(f"Backup not started: {exc}")
+                return
+
+        self.setBackupStatus(f"Backing up {len(selected)} database(s)...")
+        self.setBusy(True)
+        server = self._dbServer
+        destination = self._backupDestination
+        self.threadpool.start(
+            Worker(
+                lambda: self.performFullBackups(
+                    selected,
+                    server,
+                    destination,
+                    r2_settings,
+                    r2_secret,
+                )
+            )
+        )
+
+    def performFullBackups(
+        self,
+        databases: list[backup_service.BackupDatabase],
+        server: str,
+        destination: str,
+        r2_settings: Optional[r2_service.R2Settings] = None,
+        r2_secret: Optional[str] = None,
+    ):
+        completed: list[str] = []
+        failures: list[str] = []
+        cloud_uploaded = 0
+        cloud_failures: list[str] = []
+        try:
+            for database in databases:
+                try:
+                    path = backup_service.create_full_backup(
+                        server,
+                        database.name,
+                        destination,
+                    )
+                    completed.append(path)
+                    self.appendBackupLog(f"Created and verified {path}")
+                    if r2_settings is not None and r2_secret is not None:
+                        try:
+                            object_key = r2_service.upload_backup(
+                                path,
+                                r2_settings,
+                                r2_secret,
+                                company_code=database.company_code,
+                                financial_year=database.financial_year,
+                                progress_callback=lambda done, total, name=database.name: (
+                                    self.r2TransferChanged.emit(
+                                        done,
+                                        total,
+                                        name,
+                                        True,
+                                    )
+                                ),
+                            )
+                            self.r2TransferChanged.emit(
+                                1,
+                                1,
+                                database.name,
+                                False,
+                            )
+                            cloud_uploaded += 1
+                            self.appendBackupLog(
+                                f"Uploaded {database.name} to R2: "
+                                f"{r2_settings.bucket_name}/{object_key}"
+                            )
+                        except Exception as exc:
+                            self.r2TransferChanged.emit(
+                                0,
+                                0,
+                                database.name,
+                                False,
+                            )
+                            message = f"{database.name}: {exc}"
+                            cloud_failures.append(message)
+                            self.appendBackupLog(f"R2 upload failed: {message}")
+                except Exception as exc:
+                    failure = f"{database.name}: {exc}"
+                    failures.append(failure)
+                    self.appendBackupLog(f"Backup failed: {failure}")
+
+            if failures or cloud_failures:
+                self.setBackupStatus(
+                    f"Backups: {len(completed)} succeeded, {len(failures)} failed. "
+                    f"R2 uploads: {cloud_uploaded} succeeded, {len(cloud_failures)} failed."
+                    + (
+                        f" First error: {(failures or cloud_failures)[0]}"
+                        if failures or cloud_failures else ""
+                    )
+                )
+            else:
+                message = f"Backup complete: {len(completed)} database(s) verified."
+                if r2_settings is not None:
+                    message += f" R2 upload complete: {cloud_uploaded} object(s)."
+                self.setBackupStatus(message)
+        finally:
+            self.setBusy(False)
 
     @Slot()
     def onAutoUpdateTrigger(self):
@@ -334,6 +766,140 @@ class MainWindow(QObject):
         return "\n".join(self._logs)
 
     logs = Property(str, getLogs, notify=logChanged)  # type: ignore
+
+    @Slot()
+    def copyLogs(self):
+        QApplication.clipboard().setText(self.getLogs())
+
+    def getBackupDatabases(self):
+        return [
+            item.as_dict(item.name in self._selectedBackupDatabases)
+            for item in self._backupDatabases
+        ]
+
+    backupDatabases = Property(
+        "QVariantList",
+        getBackupDatabases,
+        notify=backupDatabasesChanged,
+    )  # type: ignore
+
+    def getBackupCompanies(self):
+        return backup_service.group_databases(
+            self._backupDatabases,
+            self._selectedBackupDatabases,
+        )
+
+    backupCompanies = Property(
+        "QVariantList",
+        getBackupCompanies,
+        notify=backupDatabasesChanged,
+    )  # type: ignore
+
+    def getBackupDestination(self):
+        return self._backupDestination
+
+    def setBackupDestination(self, destination):
+        cleaned = str(destination).strip()
+        if self._backupDestination != cleaned:
+            self._backupDestination = cleaned
+            self.saveSettings()
+            self.backupDestinationChanged.emit()
+
+    backupDestination = Property(
+        str,
+        getBackupDestination,
+        setBackupDestination,
+        notify=backupDestinationChanged,
+    )  # type: ignore
+
+    def getBackupScheduleEnabled(self):
+        return self._backupScheduleEnabled
+
+    def setBackupScheduleEnabled(self, enabled):
+        enabled = bool(enabled)
+        if self._backupScheduleEnabled != enabled:
+            self._backupScheduleEnabled = enabled
+            settings_saved = self.saveSettings()
+            if enabled:
+                self.startBackupSchedule()
+                if settings_saved:
+                    self.setBackupStatus(
+                        f"Daily backups scheduled at {self._backupScheduleTime} local time "
+                        "while this app is running."
+                    )
+                self.appendBackupLog(
+                    f"Daily backup schedule enabled for {self._backupScheduleTime} local time."
+                )
+            else:
+                self.backupScheduleTimer.stop()
+                if settings_saved:
+                    self.setBackupStatus("Daily backup schedule disabled.")
+                self.appendBackupLog("Daily backup schedule disabled.")
+            self.backupScheduleEnabledChanged.emit()
+
+    backupScheduleEnabled = Property(
+        bool,
+        getBackupScheduleEnabled,
+        setBackupScheduleEnabled,
+        notify=backupScheduleEnabledChanged,
+    )  # type: ignore
+
+    def getBackupScheduleTime(self):
+        return self._backupScheduleTime
+
+    def setBackupScheduleTime(self, schedule_time):
+        cleaned = str(schedule_time).strip()
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", cleaned):
+            self.setBackupStatus("Enter the daily backup time in 24-hour HH:mm format.")
+            return
+        if self._backupScheduleTime != cleaned:
+            self._backupScheduleTime = cleaned
+            self.saveSettings()
+            if self._backupScheduleEnabled:
+                self.startBackupSchedule()
+            self.backupScheduleTimeChanged.emit()
+
+    backupScheduleTime = Property(
+        str,
+        getBackupScheduleTime,
+        setBackupScheduleTime,
+        notify=backupScheduleTimeChanged,
+    )  # type: ignore
+
+    def getBackupStatus(self):
+        return self._backupStatus
+
+    backupStatus = Property(str, getBackupStatus, notify=backupStatusChanged)  # type: ignore
+
+    def getBackupHistory(self):
+        return "\n".join(reversed(self._backupHistory))
+
+    backupHistory = Property(str, getBackupHistory, notify=backupHistoryChanged)  # type: ignore
+
+    def getR2AccountId(self):
+        return self._r2AccountId
+
+    r2AccountId = Property(str, getR2AccountId, notify=r2SettingsChanged)  # type: ignore
+
+    def getR2BucketName(self):
+        return self._r2BucketName
+
+    r2BucketName = Property(str, getR2BucketName, notify=r2SettingsChanged)  # type: ignore
+
+    def getR2AccessKeyId(self):
+        return self._r2AccessKeyId
+
+    r2AccessKeyId = Property(str, getR2AccessKeyId, notify=r2SettingsChanged)  # type: ignore
+
+    def getR2UploadEnabled(self):
+        return self._r2UploadEnabled
+
+    r2UploadEnabled = Property(
+        bool,
+        getR2UploadEnabled,
+        setR2UploadEnabled,
+        notify=r2UploadEnabledChanged,
+    )  # type: ignore
 
     def getAutoUpdateEnabled(self):
         return self._autoUpdateEnabled
