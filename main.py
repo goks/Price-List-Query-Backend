@@ -161,7 +161,7 @@ class MainWindow(QObject):
         self._backupScheduleTime = "02:00"
         self._backupStatus = "Refresh the database list to choose company years."
         self._backupHistory: list[str] = []
-        self._scheduledBackupPending = False
+        self._backupPendingAfterDiscovery = False
         self._r2AccountId = ""
         self._r2BucketName = ""
         self._r2AccessKeyId = ""
@@ -347,7 +347,7 @@ class MainWindow(QObject):
             self.appendBackupLog("Scheduled backup skipped because another operation is running.")
             self.setBackupStatus("Scheduled backup skipped because another operation is running.")
         else:
-            self._scheduledBackupPending = True
+            self._backupPendingAfterDiscovery = True
             self.refreshBackupDatabases()
         self.startBackupSchedule()
 
@@ -638,10 +638,10 @@ class MainWindow(QObject):
             self.appendBackupLog(f"Database discovery failed: {exc}")
         finally:
             self.setBusy(False)
-            if self._scheduledBackupPending:
-                self._scheduledBackupPending = False
+            if self._backupPendingAfterDiscovery:
+                self._backupPendingAfterDiscovery = False
                 if discovery_succeeded:
-                    self.runBackupNow()
+                    self.startBackupFromSelection()
 
     @Slot(str, bool)
     def setBackupDatabaseSelected(self, database_name: str, selected: bool):
@@ -819,12 +819,28 @@ class MainWindow(QObject):
         if self._isBusy:
             self.setBackupStatus("Wait for the current database operation to finish.")
             return
+        if not self._backupDestination.strip():
+            self.setBackupStatus(
+                "Enter an absolute folder path on the SQL Server host first."
+            )
+            return
+
+        self._backupPendingAfterDiscovery = True
+        self.setBackupStatus("Searching SQL Server for selected company/year databases...")
+        self.refreshBackupDatabases()
+
+    def startBackupFromSelection(self):
         selected = [
             item for item in self._backupDatabases
             if item.name in self._selectedBackupDatabases
         ]
         if not selected:
-            self.setBackupStatus("Select at least one company/year database.")
+            message = (
+                "No selected company/year databases were found. Select companies "
+                "and financial years, then try again."
+            )
+            self.setBackupStatus(message)
+            self.appendBackupLog(message)
             return
         if not self._backupDestination.strip():
             self.setBackupStatus(
