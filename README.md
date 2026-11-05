@@ -26,58 +26,19 @@ The year row also shows the database's allocated SQL data-plus-log file size as
 reported by SQL Server. This is a planning reference; the resulting `.bak` size
 can differ.
 
-The destination is a path on the SQL Server host, because SQL Server itself writes
-the `.bak` file. If the app is running on that same computer, a local absolute path
-such as `C:\SQLBackups` is sufficient; a UNC share is not mandatory. If the app is
-connecting remotely or the backup should go to another machine, use a UNC path
-such as `\\HomeServer\SQLBackups`. The folder must already exist. Grant the SQL
-Express service account on the database host write access to the folder or share;
-access available only to the desktop user's Windows account is not enough. Use
-**Check Folder** to confirm that SQL Server can see the destination. The folder
-check confirms visibility, while a successful backup and checksum verification
-confirms that SQL Server could write and read the backup. If Cloudflare R2 uploads
-are enabled, the app must also be able to read the completed backup at that path;
-for a remote SQL Server, this generally means using a share accessible to both
-SQL Server and the app.
-The Windows account used by the app must also be allowed to enumerate the SQL
-databases, read the company metadata, and run SQL Server backups.
+SQL Server writes the `.bak` file to an absolute local folder on the same computer,
+for example `C:\SQLBackups`. Create the folder first and grant the SQL Express
+service account write access. Use **Check Folder** to confirm SQL Server can see
+the destination. A successful backup and checksum verification confirms that SQL
+Server could write and read the backup. If Cloudflare R2 uploads are enabled, the
+app must also be able to read the completed backup at that path. The Windows
+account used by the app must be allowed to enumerate SQL databases, read the
+company metadata, and run SQL Server backups.
 
-### Connecting a remote HomeServer over Tailscale
-
-The SQL Server host performs the file write. Tailscale must therefore connect the
-machine running SQL Express to the machine or VM that hosts the SMB share; having
-Tailscale only on the desktop UI is not enough.
-
-1. Install and sign in to Tailscale on the SQL Express host and on the Proxmox guest
-   or NAS that serves SMB. Prefer installing Tailscale on the file-server guest,
-   rather than exposing SMB on the Proxmox management host.
-2. In your Tailscale admin console, allow those devices to reach each other on SMB
-   (TCP port 445). Do not expose port 445 to the public internet.
-3. Create an SMB share and folder on the HomeServer, and grant write/read access
-   to an account that the SQL Server service can authenticate as. Tailscale gives
-   the network route; it does not provide SMB credentials. The desktop user's
-   mapped drive or login is not automatically used by SQL Server. Use an
-   appropriate service/domain identity recognized by the file server, or configure
-   credentials for the SQL Server service identity using your Windows/NAS account
-   management policy.
-4. From the SQL host, verify the share is reachable over Tailscale. Enter a UNC
-   path in the app, such as `\\100.x.y.z\SQLBackups` using the HomeServer guest's
-   Tailscale IP, or `\\<tailnet-device-name>\SQLBackups` if MagicDNS resolves that
-   name on the SQL host.
-5. In **SQL Backups**, choose **Check Folder**. This checks the folder from SQL
-   Server's point of view. Then run one manual backup and confirm the `.bak` file
-   and checksum verification before relying on the daily schedule.
-
-Cloudflare Tunnel is for supported web/HTTP or private-network access patterns;
-it is not a direct SMB tunnel. For this app's UNC backup destination, use
-Tailscale between the SQL host and the SMB file server. Do not publish SMB through
-a public Cloudflare hostname or expose its port on the router.
-
-The daily schedule uses the desktop's local time and runs while the app process is
-running (it can remain minimized to the system tray). If the app is not running at
-the scheduled time, that day's run is skipped. Use the existing **Start on boot**
-setting if the app should launch minimized when Windows starts. No network
-SMB credentials are stored by the app; configure share access through Windows.
+The daily backup schedule uses the computer's local time and runs while the app
+process is running (it can remain minimized to the system tray). If the app is not
+running at the scheduled time, that day's run is skipped. Use the existing
+**Start on boot** setting if the app should launch minimized when Windows starts.
 
 ### Uploading backups to Cloudflare R2
 
@@ -102,19 +63,12 @@ per-file progress bar is displayed during transfer.
    backup is first written and verified at the configured backup destination,
    then uploaded. If an upload fails, the local `.bak` remains in place and the
    error is shown in backup history.
-4. The app process must be able to read each completed `.bak` file. For testing,
-   this means the desktop user needs read access to the configured share. In
-   production, run the app under the intended Windows user on the SQL Server
-   machine and configure a backup path that the app can read there. SQL Server
-   still needs its own permission to write to the backup destination.
+4. The app process must be able to read each completed `.bak` file. Grant the app's
+   Windows account read access to the configured backup folder, and grant the SQL
+   Server service account write access.
 5. Objects are stored under
    `sql-backups/BusyCompNNNN/FY<start year>-<end year>/<backup filename>` (for
    example, `FY2026-2027`). The R2 bucket remains private.
-   The HomeServer can pull these objects with an S3-compatible client such as
-   `rclone`, using a separate bucket-restricted read-only token. For example,
-   after configuring an `rclone` remote named `r2`, run
-   `rclone copy r2:<bucket-name>/sql-backups /path/to/sql-backups` on the
-   HomeServer. Protect that token and the rclone configuration on the HomeServer.
 
 The uploader does not delete local backups or old R2 objects. Configure an
 appropriate retention policy separately after validating your restore process.
@@ -187,4 +141,4 @@ Run the focused tests with `python -m unittest discover -s tests -v`.
 - Trigger the `Version Bump` GitHub Actions workflow.
 - That workflow updates `app_version.py` and `installer.nsi`, commits the change, and creates the matching `vX.Y.Z` tag.
 - Pushing that tag automatically triggers `Build Windows Release`.
-- `Build Windows Release` builds versioned portable and installer files (for example, `Price List Update v1.2.3.exe` and `Price List Update v1.2.3-installer.exe`), then uploads them to the GitHub release for that tag. The installer requests administrator elevation whenever it is launched; the portable executable does not require installation.
+- `Build Windows Release` builds versioned portable and installer files (for example, `Price List Update v1.2.3.exe` and `Price List Update v1.2.3-installer.exe`), then uploads them to the GitHub release for that tag. The installed application filename remains `Price List Update.exe` across releases. The installer requests administrator elevation when launched; the portable executable does not require installation.

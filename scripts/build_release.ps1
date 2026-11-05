@@ -18,15 +18,18 @@ if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') {
 }
 $portableName = "Price List Update v$version.exe"
 $installerName = "Price List Update v$version-installer.exe"
+$portableBuildPath = ".\dist\Price List Update.exe"
+$portableReleasePath = Join-Path ".\dist" $portableName
 
 Write-Host "Building PyInstaller executable..."
 python -m PyInstaller --noconfirm main.spec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed to build the portable executable."
 }
-if (-not (Test-Path (Join-Path ".\dist" $portableName))) {
-    throw "Expected portable executable was not created: $portableName"
+if (-not (Test-Path $portableBuildPath)) {
+    throw "Expected build executable was not created: $portableBuildPath"
 }
+Copy-Item -LiteralPath $portableBuildPath -Destination $portableReleasePath -Force
 
 Write-Host "Building NSIS installer..."
 $makensisCandidates = @(
