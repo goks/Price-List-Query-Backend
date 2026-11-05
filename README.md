@@ -137,11 +137,12 @@ the terminal. The port and communication key must match the machine's network
 settings.
 
 Enter the machine IP address and port, optionally enter its numeric communication
-key, set an independent import interval from 1 to 168 hours, and save. The
-communication key is stored in the current Windows user's Credential Manager;
-only the address, port, interval, and schedule preference are stored in app
-settings. Test the connection before enabling the schedule. The automatic import
-runs only while the app process is running and is independent of price-list sync.
+key, and save. The fixed automatic schedule runs every 10 minutes from 8:00 AM
+through 11:00 AM, then every hour on the hour, using the computer's local time.
+The communication key is stored in the current Windows user's Credential Manager;
+only the address, port, and schedule preference are stored in app settings. Test
+the connection before enabling the schedule. Automatic imports run only while the
+app process is running and are independent of price-list sync.
 The Attendance Import tab keeps device/schedule fields under a collapsible
 Settings control, shows transfer progress during imports, and displays the
 current local day's imported attendance rows after a successful import.

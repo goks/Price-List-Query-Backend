@@ -65,6 +65,17 @@ def validate_device_settings(settings: DeviceSettings) -> None:
         raise AttendanceError("The machine TCP port must be between 1 and 65535.")
 
 
+def next_scheduled_import(now: datetime) -> datetime:
+    current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+    if 8 <= now.hour < 11:
+        minutes_since_eight = (now.hour - 8) * 60 + now.minute
+        next_slot = (minutes_since_eight // 10 + 1) * 10
+        return now.replace(hour=8, minute=0, second=0, microsecond=0) + timedelta(
+            minutes=next_slot
+        )
+    return current_hour_start + timedelta(hours=1)
+
+
 def _windows_keyring():
     backend = keyring.get_keyring()
     if not isinstance(backend, WinVaultKeyring):

@@ -75,6 +75,23 @@ class FakeFirestore:
 
 
 class AttendanceServiceTests(unittest.TestCase):
+    def test_fixed_schedule_next_run_boundaries(self):
+        test_cases = (
+            (datetime(2026, 11, 5, 7, 59), datetime(2026, 11, 5, 8, 0)),
+            (datetime(2026, 11, 5, 8, 0), datetime(2026, 11, 5, 8, 10)),
+            (datetime(2026, 11, 5, 8, 1), datetime(2026, 11, 5, 8, 10)),
+            (datetime(2026, 11, 5, 10, 55), datetime(2026, 11, 5, 11, 0)),
+            (datetime(2026, 11, 5, 11, 0), datetime(2026, 11, 5, 12, 0)),
+            (datetime(2026, 11, 5, 14, 35), datetime(2026, 11, 5, 15, 0)),
+            (datetime(2026, 11, 5, 23, 35), datetime(2026, 11, 6, 0, 0)),
+        )
+        for current, expected in test_cases:
+            with self.subTest(current=current):
+                self.assertEqual(
+                    attendance_service.next_scheduled_import(current),
+                    expected,
+                )
+
     def test_device_settings_validation(self):
         attendance_service.validate_device_settings(
             attendance_service.DeviceSettings("192.168.10.102", 4370)

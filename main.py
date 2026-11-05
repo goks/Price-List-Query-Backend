@@ -129,7 +129,6 @@ class MainWindow(QObject):
     r2TransferChanged = Signal(int, int, str, bool)
     attendanceConfigChanged = Signal()
     attendanceScheduleEnabledChanged = Signal()
-    attendanceIntervalHoursChanged = Signal()
     attendanceStatusChanged = Signal()
     attendanceHistoryChanged = Signal()
     attendanceTodayRowsChanged = Signal()
@@ -170,7 +169,6 @@ class MainWindow(QObject):
         self._r2UploadEnabled = False
         self._attendanceHost = "192.168.10.102"
         self._attendancePort = 4370
-        self._attendanceIntervalHours = 24
         self._attendanceScheduleEnabled = False
         self._attendanceStatus = "Configure the K90 Pro connection, then test it."
         self._attendanceHistory: list[str] = []
@@ -195,6 +193,7 @@ class MainWindow(QObject):
         self.backupScheduleTimer.timeout.connect(self.onScheduledBackupTrigger)
         self.startBackupSchedule()
         self.attendanceScheduleTimer = QTimer()
+        self.attendanceScheduleTimer.setSingleShot(True)
         self.attendanceScheduleTimer.timeout.connect(self.onScheduledAttendanceImport)
         self.startAttendanceSchedule()
 
@@ -234,9 +233,6 @@ class MainWindow(QObject):
                     settings.get("attendanceHost", self._attendanceHost)
                 )
                 self._attendancePort = int(settings.get("attendancePort", 4370))
-                interval_hours = int(settings.get("attendanceIntervalHours", 24))
-                if 1 <= interval_hours <= 168:
-                    self._attendanceIntervalHours = interval_hours
                 self._attendanceScheduleEnabled = bool(
                     settings.get("attendanceScheduleEnabled", False)
                 )
@@ -272,7 +268,6 @@ class MainWindow(QObject):
                 "r2UploadEnabled": self._r2UploadEnabled,
                 "attendanceHost": self._attendanceHost,
                 "attendancePort": self._attendancePort,
-                "attendanceIntervalHours": self._attendanceIntervalHours,
                 "attendanceScheduleEnabled": self._attendanceScheduleEnabled,
             }
             SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -370,13 +365,17 @@ class MainWindow(QObject):
 
     def startAttendanceSchedule(self):
         self.attendanceScheduleTimer.stop()
-        if self._attendanceScheduleEnabled:
-            self.attendanceScheduleTimer.start(
-                self._attendanceIntervalHours * 60 * 60 * 1000
-            )
+        if not self._attendanceScheduleEnabled:
+            return
+
+        now = datetime.now().astimezone()
+        next_run = attendance_service.next_scheduled_import(now)
+        interval_ms = max(1, int((next_run - now).total_seconds() * 1000))
+        self.attendanceScheduleTimer.start(interval_ms)
 
     @Slot()
     def onScheduledAttendanceImport(self):
+        self.startAttendanceSchedule()
         if self._isBusy:
             self.appendAttendanceLog(
                 "Scheduled import skipped because another operation is running."
@@ -385,13 +384,12 @@ class MainWindow(QObject):
         self.appendAttendanceLog("Scheduled import started.")
         self.runAttendanceImport()
 
-    @Slot(str, str, str, str, result=bool)
+    @Slot(str, str, str, result=bool)
     def saveAttendanceSettings(
         self,
         host: str,
         port_text: str,
         communication_key: str,
-        interval_text: str,
     ):
         try:
             settings = attendance_service.DeviceSettings(
@@ -399,11 +397,6 @@ class MainWindow(QObject):
                 port=int(port_text),
             )
             attendance_service.validate_device_settings(settings)
-            interval_hours = int(interval_text)
-            if not 1 <= interval_hours <= 168:
-                raise attendance_service.AttendanceError(
-                    "Choose an import interval between 1 and 168 hours."
-                )
             if communication_key:
                 attendance_service.save_communication_key(
                     settings.host,
@@ -414,37 +407,27 @@ class MainWindow(QObject):
             self.appendAttendanceLog(f"Settings were not saved: {exc}")
             return False
 
-        previous_config = (
-            self._attendanceHost,
-            self._attendancePort,
-            self._attendanceIntervalHours,
-        )
+        previous_config = (self._attendanceHost, self._attendancePort)
         self._attendanceHost = settings.host
         self._attendancePort = settings.port
-        self._attendanceIntervalHours = interval_hours
         saved = self.saveSettings()
         if not saved:
-            (
-                self._attendanceHost,
-                self._attendancePort,
-                self._attendanceIntervalHours,
-            ) = previous_config
+            self._attendanceHost, self._attendancePort = previous_config
             self.setAttendanceStatus("Could not save attendance settings.")
             self.appendAttendanceLog("Device settings were not saved.")
             self.attendanceConfigChanged.emit()
-            self.attendanceIntervalHoursChanged.emit()
             return False
 
         self.setAttendanceStatus(
-            "Settings saved. Test the device connection before enabling its schedule."
+            "Settings saved. The schedule runs every 10 minutes from 8:00 AM "
+            "through 11:00 AM, then hourly on the hour. Test the connection "
+            "before enabling automatic imports."
         )
         self.appendAttendanceLog(
-            f"Device settings saved for {settings.host}:{settings.port}; "
-            f"interval {interval_hours} hours."
+            f"Device settings saved for {settings.host}:{settings.port}."
         )
         self.startAttendanceSchedule()
         self.attendanceConfigChanged.emit()
-        self.attendanceIntervalHoursChanged.emit()
         return True
 
     @Slot(bool)
@@ -466,8 +449,9 @@ class MainWindow(QObject):
         self.startAttendanceSchedule()
         if enabled:
             message = (
-                f"Automatic attendance import enabled every "
-                f"{self._attendanceIntervalHours} hours while this app is running."
+                "Automatic attendance import enabled: every 10 minutes from "
+                "8:00 AM through 11:00 AM, then hourly on the hour (local time) "
+                "while this app is running."
             )
         else:
             message = "Automatic attendance import disabled."
@@ -1184,15 +1168,6 @@ class MainWindow(QObject):
         return self._attendancePort
 
     attendancePort = Property(int, getAttendancePort, notify=attendanceConfigChanged)  # type: ignore
-
-    def getAttendanceIntervalHours(self):
-        return self._attendanceIntervalHours
-
-    attendanceIntervalHours = Property(
-        int,
-        getAttendanceIntervalHours,
-        notify=attendanceIntervalHoursChanged,
-    )  # type: ignore
 
     def getAttendanceScheduleEnabled(self):
         return self._attendanceScheduleEnabled

@@ -1110,7 +1110,7 @@ Window {
                                   + backend.attendanceHost + ":" + backend.attendancePort
                                   + "  ·  "
                                   + (backend.attendanceScheduleEnabled
-                                     ? "Every " + backend.attendanceIntervalHours + " hours"
+                                     ? "10m 8–11 AM, hourly after"
                                      : "Schedule off")
                             buttonHeight: 46
                             Layout.fillWidth: true
@@ -1192,36 +1192,29 @@ Window {
                             }
                         }
 
-                        Text {
+                        Rectangle {
                             visible: window.attendanceSettingsExpanded
-                            text: "Import every (hours)"
-                            font.pixelSize: 12
-                            font.family: "Poppins Medium"
-                            color: "#31525B"
+                            Layout.fillWidth: true
+                            radius: 10
+                            color: "#EAF0E1"
+                            implicitHeight: attendanceScheduleDescription.implicitHeight + 20
+
+                            Text {
+                                id: attendanceScheduleDescription
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                text: "Automatic schedule (local time): every 10 minutes from 8:00 AM through 11:00 AM, then every hour on the hour."
+                                wrapMode: Text.WordWrap
+                                font.pixelSize: 11
+                                font.family: "Poppins Medium"
+                                color: "#31525B"
+                            }
                         }
 
                         RowLayout {
                             visible: window.attendanceSettingsExpanded
                             Layout.fillWidth: true
                             spacing: 10
-
-                            TextField {
-                                id: attendanceIntervalField
-                                objectName: "attendanceIntervalField"
-                                Layout.preferredWidth: 110
-                                text: backend.attendanceIntervalHours.toString()
-                                placeholderText: "24"
-                                validator: IntValidator { bottom: 1; top: 168 }
-                                color: window.ink
-                                font.pixelSize: 12
-                                font.family: "Poppins"
-                                background: Rectangle {
-                                    radius: 12
-                                    color: "white"
-                                    border.color: "#C2CFD3"
-                                    border.width: 1
-                                }
-                            }
 
                             Text {
                                 text: "Independent of the price-list sync schedule."
@@ -1239,8 +1232,7 @@ Window {
                                     if (backend.saveAttendanceSettings(
                                                 attendanceHostField.text,
                                                 attendancePortField.text,
-                                                attendanceKeyField.text,
-                                                attendanceIntervalField.text
+                                                attendanceKeyField.text
                                             )) {
                                         attendanceKeyField.clear()
                                         backend.attendanceScheduleEnabled = checked
@@ -1260,14 +1252,12 @@ Window {
                                 text: "Save Settings"
                                 enabled: !backend.isBusy
                                          && attendancePortField.acceptableInput
-                                         && attendanceIntervalField.acceptableInput
                                 Layout.fillWidth: true
                                 onClicked: {
                                     if (backend.saveAttendanceSettings(
                                                 attendanceHostField.text,
                                                 attendancePortField.text,
-                                                attendanceKeyField.text,
-                                                attendanceIntervalField.text
+                                                attendanceKeyField.text
                                             )) {
                                         attendanceKeyField.clear()
                                     }
@@ -2112,12 +2102,6 @@ Window {
                 attendancePortField.text = backend.attendancePort.toString()
             }
             attendanceKeyField.clear()
-        }
-
-        function onAttendanceIntervalHoursChanged() {
-            if (!attendanceIntervalField.activeFocus) {
-                attendanceIntervalField.text = backend.attendanceIntervalHours.toString()
-            }
         }
 
         function onAttendanceProgressChanged(done, total, stage, active) {
