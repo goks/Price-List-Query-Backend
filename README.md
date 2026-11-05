@@ -42,12 +42,17 @@ running at the scheduled time, that day's run is skipped. Use the existing
 
 ### Uploading backups to Cloudflare R2
 
-The app can optionally upload each completed and SQL-verified backup to a private
-Cloudflare R2 bucket. It uses Cloudflare's S3-compatible API and multipart upload
-support. The app checks total usage across the entire selected bucket before each
-upload and blocks an upload if its projected total would exceed 10,000,000,000
-bytes (10 GB decimal). It checks again after upload; if a race pushes usage above
-the limit, it removes the newly uploaded object and reports failure. A live
+The app can optionally upload SQL-verified backups to a private Cloudflare R2
+bucket. It uses Cloudflare's S3-compatible API and multipart upload support. For
+each upload session, it first prepares every selected backup locally and totals
+their sizes. If the session alone would reach 10,000,000,000 bytes (10 GB
+decimal), the session is canceled and the prepared local backups are retained.
+The app then checks the whole bucket. If the session would make the bucket reach
+10 GB, it clears existing objects under the configured SQL-backup prefix (default
+`sql-backups/`) and verifies the remaining bucket has room. Objects outside that
+prefix are never cleared. If the session still would not fit below 10 GB, it is
+canceled. The bucket size is checked again after each upload; a newly uploaded
+object is removed if a concurrent change causes the cap to be reached. A live
 per-file progress bar is displayed during transfer.
 
 1. In Cloudflare, create an R2 bucket and an R2 API token restricted to that bucket
@@ -59,10 +64,12 @@ per-file progress bar is displayed during transfer.
    bucket name, Access Key ID, and Secret Access Key. Choose **Save R2 Settings**;
    the secret is saved in the current Windows user's Credential Manager, not in
    the app's JSON settings file.
-3. Choose **Test R2 Connection**. After it succeeds, enable R2 upload. Each new
-   backup is first written and verified at the configured backup destination,
-   then uploaded. If an upload fails, the local `.bak` remains in place and the
-   error is shown in backup history.
+3. Choose **Test R2 Connection**. After it succeeds, enable R2 upload. Each
+   selected backup is written and verified locally before any file in the session
+   is uploaded. After an individual upload succeeds and is verified, its local
+   `.bak` is deleted. A failed upload keeps its local `.bak`; if a later upload
+   fails, local files for earlier successful uploads have already been deleted.
+   The error is shown in backup history.
 4. The app process must be able to read each completed `.bak` file. Grant the app's
    Windows account read access to the configured backup folder, and grant the SQL
    Server service account write access.
@@ -70,12 +77,13 @@ per-file progress bar is displayed during transfer.
    `sql-backups/BusyCompNNNN/FY<start year>-<end year>/<backup filename>` (for
    example, `FY2026-2027`). The R2 bucket remains private.
 
-The uploader does not delete local backups or old R2 objects. Configure an
-appropriate retention policy separately after validating your restore process.
-R2 account storage and operation quotas/pricing are set by Cloudflare; monitor
-usage in the Cloudflare dashboard. The app enforces a 10 GB current bucket-size
-ceiling for its uploads; this is not a calculation of Cloudflare's monthly
-average storage usage or a guarantee about billing/free-tier eligibility.
+When the bucket needs space, the app deletes all existing objects under the
+configured SQL-backup prefix before uploading the new session; keep copies of
+older backups elsewhere if they must be retained. R2 account storage and operation
+quotas/pricing are set by Cloudflare; monitor usage in the Cloudflare dashboard.
+The app enforces a strict below-10-GB current bucket-size ceiling for its uploads;
+this is not a calculation of Cloudflare's monthly average storage usage or a
+guarantee about billing/free-tier eligibility.
 
 R2 account ID, bucket, access key ID, and upload preference are per-user app
 settings. The secret lives in that Windows user's Credential Manager; production

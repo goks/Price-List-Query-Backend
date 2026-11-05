@@ -645,6 +645,15 @@ Window {
                                 }
 
                                 Text {
+                                    text: "Before upload, all selected backups are prepared and sized together. If the bucket would reach 10 GB, existing objects under the SQL-backup prefix are cleared to make room; unrelated objects are kept. Each local backup is deleted only after its upload succeeds. Failed uploads remain local."
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 10
+                                    font.family: "Poppins Medium"
+                                    color: "#8A4B18"
+                                    Layout.fillWidth: true
+                                }
+
+                                Text {
                                     text: "1. Cloudflare Account ID"
                                     font.pixelSize: 12
                                     font.family: "Poppins Medium"

@@ -888,6 +888,8 @@ class MainWindow(QObject):
         failures: list[str] = []
         cloud_uploaded = 0
         cloud_failures: list[str] = []
+        local_cleanup_failures: list[str] = []
+        prepared: list[tuple[backup_service.BackupDatabase, str]] = []
         try:
             for database in databases:
                 try:
@@ -897,8 +899,52 @@ class MainWindow(QObject):
                         destination,
                     )
                     completed.append(path)
+                    prepared.append((database, path))
                     self.appendBackupLog(f"Created and verified {path}")
-                    if r2_settings is not None and r2_secret is not None:
+
+                except Exception as exc:
+                    failure = f"{database.name}: {exc}"
+                    failures.append(failure)
+                    self.appendBackupLog(f"Backup failed: {failure}")
+
+            if r2_settings is not None and r2_secret is not None and failures:
+                message = (
+                    "Upload session canceled because one or more selected SQL "
+                    "backups could not be prepared. Prepared local backups were retained."
+                )
+                cloud_failures.append(message)
+                self.appendBackupLog(message)
+            elif r2_settings is not None and r2_secret is not None and prepared:
+                try:
+                    preflight = r2_service.prepare_upload_session(
+                        [path for _database, path in prepared],
+                        r2_settings,
+                        r2_secret,
+                    )
+                    self.appendBackupLog(
+                        "R2 upload session prepared: "
+                        f"{len(prepared)} backup(s), "
+                        f"{r2_service.format_storage_bytes(preflight.upload_bytes)} "
+                        "to upload; bucket usage is "
+                        f"{r2_service.format_storage_bytes(preflight.remaining_bucket_bytes)} "
+                        "before upload."
+                    )
+                    if preflight.deleted_backup_objects:
+                        self.appendBackupLog(
+                            f"Cleared {preflight.deleted_backup_objects} existing "
+                            f"R2 backup object(s) under "
+                            f"'{r2_settings.prefix.strip().strip('/')}/' to stay "
+                            "below the 10 GB limit. Other bucket objects were kept."
+                        )
+                except Exception as exc:
+                    message = f"Upload session canceled: {exc}"
+                    cloud_failures.append(message)
+                    self.appendBackupLog(
+                        f"R2 upload session canceled: {exc} "
+                        f"Prepared local backup(s) retained: {len(prepared)}."
+                    )
+                else:
+                    for database, path in prepared:
                         try:
                             object_key = r2_service.upload_backup(
                                 path,
@@ -926,6 +972,17 @@ class MainWindow(QObject):
                                 f"Uploaded {database.name} to R2: "
                                 f"{r2_settings.bucket_name}/{object_key}"
                             )
+                            try:
+                                Path(path).unlink()
+                                self.appendBackupLog(
+                                    f"Deleted local backup after verified upload: {path}"
+                                )
+                            except OSError as exc:
+                                message = f"{database.name}: could not delete local backup {path}: {exc}"
+                                local_cleanup_failures.append(message)
+                                self.appendBackupLog(
+                                    f"Local backup cleanup failed: {message}"
+                                )
                         except Exception as exc:
                             self.r2TransferChanged.emit(
                                 0,
@@ -936,18 +993,16 @@ class MainWindow(QObject):
                             message = f"{database.name}: {exc}"
                             cloud_failures.append(message)
                             self.appendBackupLog(f"R2 upload failed: {message}")
-                except Exception as exc:
-                    failure = f"{database.name}: {exc}"
-                    failures.append(failure)
-                    self.appendBackupLog(f"Backup failed: {failure}")
 
-            if failures or cloud_failures:
+            if failures or cloud_failures or local_cleanup_failures:
+                first_error = failures or cloud_failures or local_cleanup_failures
                 self.setBackupStatus(
                     f"Backups: {len(completed)} succeeded, {len(failures)} failed. "
                     f"R2 uploads: {cloud_uploaded} succeeded, {len(cloud_failures)} failed."
+                    f" Local cleanup: {len(local_cleanup_failures)} failed."
                     + (
-                        f" First error: {(failures or cloud_failures)[0]}"
-                        if failures or cloud_failures else ""
+                        f" First error: {first_error[0]}"
+                        if first_error else ""
                     )
                 )
             else:

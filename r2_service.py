@@ -3,7 +3,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import boto3
 import keyring
@@ -29,6 +29,14 @@ class R2Settings:
     @property
     def endpoint_url(self) -> str:
         return f"https://{self.account_id}.r2.cloudflarestorage.com"
+
+
+@dataclass(frozen=True)
+class UploadSessionPreflight:
+    upload_bytes: int
+    initial_bucket_bytes: int
+    remaining_bucket_bytes: int
+    deleted_backup_objects: int
 
 
 def _windows_keyring():
@@ -122,21 +130,153 @@ def format_storage_bytes(size_bytes: int) -> str:
     return f"{size_bytes / 1_000_000:.1f} MB"
 
 
-def get_bucket_size(client, bucket_name: str) -> int:
+def list_bucket_objects(client, bucket_name: str) -> list[dict[str, Any]]:
     try:
         paginator = client.get_paginator("list_objects_v2")
-        total_bytes = 0
+        objects = []
         for page in paginator.paginate(Bucket=bucket_name):
-            total_bytes += sum(
-                int(item.get("Size", 0))
-                for item in page.get("Contents", [])
-            )
-        return total_bytes
+            objects.extend(page.get("Contents", []))
+        return objects
     except Exception as exc:
         raise R2Error(
             "Could not check current R2 bucket storage. The R2 token needs "
             f"bucket list/read permission: {exc}"
         ) from exc
+
+
+def get_bucket_size(client, bucket_name: str) -> int:
+    return sum(
+        int(item.get("Size", 0))
+        for item in list_bucket_objects(client, bucket_name)
+    )
+
+
+def prepare_upload_session(
+    file_paths: list[str],
+    settings: R2Settings,
+    secret_access_key: str,
+    client_factory: Callable = boto3.client,
+) -> UploadSessionPreflight:
+    if not file_paths:
+        raise R2Error("No prepared SQL backup files were provided for upload.")
+
+    backup_files = [Path(file_path) for file_path in file_paths]
+    sizes = []
+    for backup_file in backup_files:
+        if not backup_file.is_file():
+            raise R2Error(
+                f"Backup file is not readable from this computer: {backup_file}. "
+                "Ensure the app process can read the SQL Server backup folder."
+            )
+        try:
+            sizes.append(backup_file.stat().st_size)
+        except OSError as exc:
+            raise R2Error(
+                f"Could not determine the size of prepared backup "
+                f"{backup_file}: {exc}"
+            ) from exc
+
+    upload_bytes = sum(sizes)
+    if upload_bytes >= MAX_BUCKET_BYTES:
+        raise R2Error(
+            "The prepared SQL backups total "
+            f"{format_storage_bytes(upload_bytes)}, which is not below the "
+            "10 GB R2 limit. The upload session was canceled."
+        )
+
+    client = create_client(settings, secret_access_key, client_factory)
+    bucket_name = settings.bucket_name.strip()
+    objects = list_bucket_objects(client, bucket_name)
+    initial_bucket_bytes = sum(int(item.get("Size", 0)) for item in objects)
+    projected_bytes = initial_bucket_bytes + upload_bytes
+    if projected_bytes < MAX_BUCKET_BYTES:
+        return UploadSessionPreflight(
+            upload_bytes=upload_bytes,
+            initial_bucket_bytes=initial_bucket_bytes,
+            remaining_bucket_bytes=initial_bucket_bytes,
+            deleted_backup_objects=0,
+        )
+
+    prefix = settings.prefix.strip().strip("/")
+    if not prefix:
+        raise R2Error(
+            "The R2 bucket would exceed 10 GB, and no SQL-backup prefix is "
+            "configured for safe cleanup. No cloud backups were deleted."
+        )
+
+    managed_prefix = f"{prefix}/"
+    backup_objects = [
+        item for item in objects
+        if str(item.get("Key", "")).startswith(managed_prefix)
+    ]
+    backup_bytes = sum(int(item.get("Size", 0)) for item in backup_objects)
+    non_backup_bytes = initial_bucket_bytes - backup_bytes
+    if non_backup_bytes + upload_bytes >= MAX_BUCKET_BYTES:
+        raise R2Error(
+            "The prepared SQL backups plus bucket objects outside the configured "
+            f"'{managed_prefix}' prefix would use "
+            f"{format_storage_bytes(non_backup_bytes + upload_bytes)}, which is "
+            "not below the 10 GB limit. No existing cloud backups were deleted."
+        )
+    if not backup_objects:
+        raise R2Error(
+            "The R2 bucket would exceed 10 GB, but there are no existing objects "
+            f"under '{managed_prefix}' to clear. No cloud backups were deleted."
+        )
+
+    try:
+        for offset in range(0, len(backup_objects), 1000):
+            batch = backup_objects[offset:offset + 1000]
+            response = client.delete_objects(
+                Bucket=bucket_name,
+                Delete={
+                    "Objects": [{"Key": item["Key"]} for item in batch],
+                    "Quiet": True,
+                },
+            )
+            deletion_errors = response.get("Errors", [])
+            if deletion_errors:
+                details = "; ".join(
+                    f"{item.get('Key', '<unknown key>')}: "
+                    f"{item.get('Message', 'delete failed')}"
+                    for item in deletion_errors[:5]
+                )
+                raise R2Error(
+                    f"Could not clear all SQL backups under '{managed_prefix}': "
+                    f"{details}. Some objects may already have been deleted."
+                )
+    except R2Error:
+        raise
+    except Exception as exc:
+        raise R2Error(
+            f"Could not clear SQL backups under '{managed_prefix}'. "
+            f"Some objects may already have been deleted: {exc}"
+        ) from exc
+
+    remaining_objects = list_bucket_objects(client, bucket_name)
+    remaining_bucket_bytes = sum(
+        int(item.get("Size", 0)) for item in remaining_objects
+    )
+    if any(
+        str(item.get("Key", "")).startswith(managed_prefix)
+        for item in remaining_objects
+    ):
+        raise R2Error(
+            f"Not all objects under '{managed_prefix}' were removed. "
+            "The upload session was canceled."
+        )
+    if remaining_bucket_bytes + upload_bytes >= MAX_BUCKET_BYTES:
+        raise R2Error(
+            "The bucket would still reach or exceed 10 GB after clearing "
+            f"'{managed_prefix}'. The upload session was canceled."
+        )
+
+    return UploadSessionPreflight(
+        upload_bytes=upload_bytes,
+        initial_bucket_bytes=initial_bucket_bytes,
+        remaining_bucket_bytes=remaining_bucket_bytes,
+        deleted_backup_objects=len(backup_objects),
+    )
 
 
 def test_connection(
@@ -193,9 +333,9 @@ def upload_backup(
     file_size = backup_file.stat().st_size
     current_size = get_bucket_size(client, bucket_name)
     projected_size = current_size + file_size
-    if current_size > MAX_BUCKET_BYTES or projected_size > MAX_BUCKET_BYTES:
+    if current_size >= MAX_BUCKET_BYTES or projected_size >= MAX_BUCKET_BYTES:
         raise R2Error(
-            "R2 10 GB bucket limit would be exceeded: currently using "
+            "R2 10 GB bucket limit would be reached or exceeded: currently using "
             f"{format_storage_bytes(current_size)}, this backup is "
             f"{format_storage_bytes(file_size)}, projected total is "
             f"{format_storage_bytes(projected_size)}. The backup was not uploaded."
@@ -237,9 +377,9 @@ def upload_backup(
             )
 
         updated_size = get_bucket_size(client, bucket_name)
-        if updated_size > MAX_BUCKET_BYTES:
+        if updated_size >= MAX_BUCKET_BYTES:
             raise R2Error(
-                "R2 bucket usage exceeded 10 GB after upload: "
+                "R2 bucket usage reached or exceeded 10 GB after upload: "
                 f"{format_storage_bytes(updated_size)} in use. "
                 "Removing the newly uploaded backup."
             )
