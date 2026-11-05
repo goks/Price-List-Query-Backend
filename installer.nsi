@@ -96,7 +96,8 @@ FunctionEnd
 section "install"
     # Files for the install directory - to build the installer, these should be in the same directory as the install script (this file)
     setOutPath $INSTDIR
-    file /oname="Price List Update.exe" "dist\${APPNAME} v${APP_VERSION}.exe"
+    file "dist\${APPNAME} v${APP_VERSION}.exe"
+    rename "$INSTDIR\${APPNAME} v${APP_VERSION}.exe" "$INSTDIR\Price List Update.exe"
     file "icons\Price List Backend Quenry v2.ico"
 
     # Registry information for add/remove programs
