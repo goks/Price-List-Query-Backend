@@ -255,6 +255,22 @@ def _verify_server_directory(cursor, path: str) -> None:
         )
 
 
+def _report_sql_messages(
+    cursor,
+    message_callback: Optional[Callable[[str], None]],
+    operation: str,
+) -> None:
+    if message_callback is None:
+        return
+    for message in getattr(cursor, "messages", ()) or ():
+        if isinstance(message, tuple) and len(message) > 1:
+            message_text = str(message[1]).strip()
+        else:
+            message_text = str(message).strip()
+        if message_text:
+            message_callback(f"{operation}: {message_text}")
+
+
 def check_destination(
     server: str,
     destination: str,
@@ -279,6 +295,7 @@ def create_full_backup(
     destination: str,
     now: Optional[datetime] = None,
     connect: Callable = pyodbc.connect,
+    message_callback: Optional[Callable[[str], None]] = None,
 ) -> str:
     parsed = parse_database_name(database_name)
     if parsed is None:
@@ -303,14 +320,21 @@ def create_full_backup(
                 backup_path,
             )
         except pyodbc.Error as exc:
+            _report_sql_messages(cursor, message_callback, "BACKUP DATABASE")
+            if message_callback is not None:
+                message_callback(f"BACKUP DATABASE error: {exc}")
             raise BackupError(
                 f"BACKUP DATABASE failed for {backup_path}: {exc}"
             ) from exc
+        _report_sql_messages(cursor, message_callback, "BACKUP DATABASE")
 
         try:
             cursor.execute("EXEC master.dbo.xp_fileexist ?", backup_path)
             backup_file = cursor.fetchone()
         except pyodbc.Error as exc:
+            _report_sql_messages(cursor, message_callback, "Backup file check")
+            if message_callback is not None:
+                message_callback(f"Backup file check error: {exc}")
             raise BackupError(
                 f"Could not check the backup file on the SQL Server host "
                 f"before verification ({backup_path}): {exc}"
@@ -329,11 +353,15 @@ def create_full_backup(
                 backup_path,
             )
         except pyodbc.Error as exc:
+            _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
+            if message_callback is not None:
+                message_callback(f"RESTORE VERIFYONLY error: {exc}")
             raise BackupError(
                 "RESTORE VERIFYONLY failed for "
                 f"{backup_path}; SQL Server reported the file existed "
                 f"immediately before verification: {exc}"
             ) from exc
+        _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
         return backup_path
     finally:
         connection.close()

@@ -902,10 +902,16 @@ class MainWindow(QObject):
         try:
             for database in databases:
                 try:
+                    def report_sql_message(message: str) -> None:
+                        self.appendBackupLog(
+                            f"SQL Server [{database.name}]: {message}"
+                        )
+
                     path = backup_service.create_full_backup(
                         server,
                         database.name,
                         destination,
+                        message_callback=report_sql_message,
                     )
                     completed.append(path)
                     prepared.append((database, path))

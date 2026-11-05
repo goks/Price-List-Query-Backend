@@ -34,21 +34,46 @@ class BackupPathValidationTests(unittest.TestCase):
 
 class BackupDestinationTests(unittest.TestCase):
     class Cursor:
-        def __init__(self, fetchone_results=None):
+        def __init__(
+            self,
+            fetchone_results=None,
+            message_results=None,
+            execute_errors=None,
+        ):
             self.executed = []
             self.fetchone_results = list(
                 fetchone_results or [(0, 1, 0), (1, 0, 1)]
             )
+            self.message_results = list(message_results or [])
+            self.execute_errors = execute_errors or {}
+            self.messages = []
 
         def execute(self, query, *parameters):
             self.executed.append((query, parameters))
+            execute_index = len(self.executed)
+            self.messages = (
+                self.message_results[execute_index - 1]
+                if execute_index <= len(self.message_results)
+                else []
+            )
+            if execute_index in self.execute_errors:
+                raise self.execute_errors[execute_index]
 
         def fetchone(self):
             return self.fetchone_results.pop(0)
 
     class Connection:
-        def __init__(self, fetchone_results=None):
-            self.cursor_instance = BackupDestinationTests.Cursor(fetchone_results)
+        def __init__(
+            self,
+            fetchone_results=None,
+            message_results=None,
+            execute_errors=None,
+        ):
+            self.cursor_instance = BackupDestinationTests.Cursor(
+                fetchone_results,
+                message_results,
+                execute_errors,
+            )
             self.closed = False
 
         def cursor(self):
@@ -118,6 +143,65 @@ class BackupDestinationTests(unittest.TestCase):
             "Verification should not run when SQL Server cannot see the file.",
         )
         self.assertTrue(connection.closed)
+
+    def test_backup_reports_sql_server_messages(self):
+        connection = self.Connection(
+            message_results=[
+                [],
+                [("01000", "Processed 3202 pages for database.")],
+                [],
+                [("01000", "The backup set on file 1 is valid.")],
+            ]
+        )
+        messages = []
+
+        backup_service.create_full_backup(
+            ".\\SQLEXPRESS",
+            "BusyComp0001_db12026",
+            "D:\\SQLBackups",
+            connect=lambda *_args, **_kwargs: connection,
+            message_callback=messages.append,
+        )
+
+        self.assertEqual(
+            messages,
+            [
+                "BACKUP DATABASE: Processed 3202 pages for database.",
+                "RESTORE VERIFYONLY: The backup set on file 1 is valid.",
+            ],
+        )
+
+    def test_backup_reports_sql_server_messages_when_backup_fails(self):
+        connection = self.Connection(
+            message_results=[
+                [],
+                [("01000", "Error: 3201, Cannot open backup device.")],
+            ],
+            execute_errors={
+                2: backup_service.pyodbc.Error("Operating system error 5.")
+            },
+        )
+        messages = []
+
+        with self.assertRaisesRegex(
+            backup_service.BackupError,
+            "BACKUP DATABASE failed",
+        ):
+            backup_service.create_full_backup(
+                ".\\SQLEXPRESS",
+                "BusyComp0001_db12026",
+                "D:\\SQLBackups",
+                connect=lambda *_args, **_kwargs: connection,
+                message_callback=messages.append,
+            )
+
+        self.assertIn(
+            "BACKUP DATABASE: Error: 3201, Cannot open backup device.",
+            messages,
+        )
+        self.assertTrue(
+            any("Operating system error 5." in message for message in messages)
+        )
 
 
 if __name__ == "__main__":

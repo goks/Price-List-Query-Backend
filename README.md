@@ -33,7 +33,9 @@ the destination. A successful backup and checksum verification confirms that SQL
 Server could write and read the backup. If Cloudflare R2 uploads are enabled, the
 app must also be able to read the completed backup at that path. The Windows
 account used by the app must be allowed to enumerate SQL databases, read the
-company metadata, and run SQL Server backups.
+company metadata, and run SQL Server backups. SQL Server backup and verification
+messages, including page progress and detailed ODBC errors, are added to backup
+history when each SQL command returns.
 
 The daily backup schedule uses the computer's local time and runs while the app
 process is running (it can remain minimized to the system tray). If the app is not
