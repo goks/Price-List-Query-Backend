@@ -69,7 +69,9 @@ per-file progress bar is displayed during transfer.
    is uploaded. After an individual upload succeeds and is verified, its local
    `.bak` is deleted. A failed upload keeps its local `.bak`; if a later upload
    fails, local files for earlier successful uploads have already been deleted.
-   The error is shown in backup history.
+   The error is shown in backup history. Use **Stop upload** beside the progress
+   bar to cancel the current transfer; the in-progress and remaining local
+   backups are retained, while earlier successful uploads remain in R2.
 4. The app process must be able to read each completed `.bak` file. Grant the app's
    Windows account read access to the configured backup folder, and grant the SQL
    Server service account write access.

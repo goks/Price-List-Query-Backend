@@ -564,35 +564,56 @@ Window {
                             visible: window.r2TransferActive
                             Layout.fillWidth: true
                             spacing: 4
-                            Text {
-                                text: "Uploading " + window.r2TransferFile + ": "
-                                      + (window.r2TransferTotal > 0
-                                         ? Math.floor(
-                                               window.r2TransferDone
-                                               * 100
-                                               / window.r2TransferTotal
-                                           ) + "%"
-                                         : "starting")
-                                      + " · "
-                                      + (window.r2TransferSpeed >= 1048576
-                                         ? (window.r2TransferSpeed / 1048576).toFixed(1)
-                                           + " MB/s"
-                                         : (window.r2TransferSpeed / 1024).toFixed(0)
-                                           + " KB/s")
-                                font.pixelSize: 11
-                                font.family: "Poppins Medium"
-                                color: "#31525B"
+                            RowLayout {
                                 Layout.fillWidth: true
-                                elide: Text.ElideMiddle
+                                spacing: 8
+                                Text {
+                                    text: "Uploading " + window.r2TransferFile + ": "
+                                          + (window.r2TransferTotal > 0
+                                             ? Math.floor(
+                                                   window.r2TransferDone
+                                                   * 100
+                                                   / window.r2TransferTotal
+                                               ) + "%"
+                                             : "starting")
+                                          + " · "
+                                          + (window.r2TransferSpeed >= 1048576
+                                             ? (window.r2TransferSpeed / 1048576).toFixed(1)
+                                               + " MB/s"
+                                             : (window.r2TransferSpeed / 1024).toFixed(0)
+                                               + " KB/s")
+                                    font.pixelSize: 11
+                                    font.family: "Poppins Medium"
+                                    color: "#31525B"
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideMiddle
+                                }
+                                AppButton {
+                                    text: backend.r2CancelRequested
+                                          ? "Stopping..."
+                                          : "Stop upload"
+                                    enabled: !backend.r2CancelRequested
+                                    buttonHeight: 32
+                                    Layout.preferredWidth: 104
+                                    font.pixelSize: 10
+                                    font.family: "Poppins Medium"
+                                    baseColor: "#A23B2A"
+                                    pressColor: "#812F22"
+                                    accentColor: "#F0B7A8"
+                                    onClicked: backend.cancelR2Upload()
+                                }
                             }
                             ProgressBar {
                                 Layout.fillWidth: true
                                 from: 0
-                                to: Math.max(window.r2TransferTotal, 1)
-                                value: Math.min(
-                                    window.r2TransferDone,
-                                    Math.max(window.r2TransferTotal, 1)
-                                )
+                                to: 1
+                                value: window.r2TransferTotal > 0
+                                       ? Math.min(
+                                             window.r2TransferDone
+                                             / window.r2TransferTotal,
+                                             1
+                                         )
+                                       : 0
                                 indeterminate: window.r2TransferTotal <= 0
                             }
                         }

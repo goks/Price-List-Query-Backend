@@ -4,6 +4,7 @@ import re
 import ssl
 import sys
 import tempfile
+import threading
 import traceback
 import urllib.error
 import urllib.request
@@ -127,6 +128,7 @@ class MainWindow(QObject):
     r2SettingsChanged = Signal()  # type: ignore
     r2UploadEnabledChanged = Signal()  # type: ignore
     r2TransferChanged = Signal(float, float, float, str, bool)
+    r2CancelRequestedChanged = Signal()
     attendanceConfigChanged = Signal()
     attendanceScheduleEnabledChanged = Signal()
     attendanceStatusChanged = Signal()
@@ -167,6 +169,10 @@ class MainWindow(QObject):
         self._r2AccessKeyId = ""
         self._r2Prefix = "sql-backups"
         self._r2UploadEnabled = False
+        self._r2CancelEvent = threading.Event()
+        self._r2CancelRequested = False
+        self._activeR2TransferFuture = None
+        self._r2TransferFutureLock = threading.Lock()
         self._attendanceHost = "192.168.10.102"
         self._attendancePort = 4370
         self._attendanceScheduleEnabled = False
@@ -861,6 +867,8 @@ class MainWindow(QObject):
                 return
 
         self.setBackupStatus(f"Backing up {len(selected)} database(s)...")
+        self._r2CancelEvent.clear()
+        self.setR2CancelRequested(False)
         self.setBusy(True)
         server = self._dbServer
         destination = self._backupDestination
@@ -889,6 +897,7 @@ class MainWindow(QObject):
         cloud_uploaded = 0
         cloud_failures: list[str] = []
         local_cleanup_failures: list[str] = []
+        upload_cancelled = False
         prepared: list[tuple[backup_service.BackupDatabase, str]] = []
         try:
             for database in databases:
@@ -969,6 +978,8 @@ class MainWindow(QObject):
                                         True,
                                     )
                                 ),
+                                cancel_event=self._r2CancelEvent,
+                                transfer_future_callback=self.setActiveR2TransferFuture,
                             )
                             self.r2TransferChanged.emit(
                                 1,
@@ -993,6 +1004,20 @@ class MainWindow(QObject):
                                 self.appendBackupLog(
                                     f"Local backup cleanup failed: {message}"
                                 )
+                        except r2_service.R2UploadCancelled as exc:
+                            self.r2TransferChanged.emit(
+                                0,
+                                0,
+                                0,
+                                database.name,
+                                False,
+                            )
+                            upload_cancelled = True
+                            self.appendBackupLog(
+                                f"R2 upload canceled by user for {database.name}; "
+                                f"local backup retained: {path}."
+                            )
+                            break
                         except Exception as exc:
                             self.r2TransferChanged.emit(
                                 0,
@@ -1005,7 +1030,14 @@ class MainWindow(QObject):
                             cloud_failures.append(message)
                             self.appendBackupLog(f"R2 upload failed: {message}")
 
-            if failures or cloud_failures or local_cleanup_failures:
+            if upload_cancelled:
+                message = (
+                    f"R2 upload canceled. {cloud_uploaded} backup(s) uploaded "
+                    "successfully; the in-progress and remaining local backups "
+                    "were retained."
+                )
+                self.setBackupStatus(message)
+            elif failures or cloud_failures or local_cleanup_failures:
                 first_error = failures or cloud_failures or local_cleanup_failures
                 self.setBackupStatus(
                     f"Backups: {len(completed)} succeeded, {len(failures)} failed. "
@@ -1022,7 +1054,36 @@ class MainWindow(QObject):
                     message += f" R2 upload complete: {cloud_uploaded} object(s)."
                 self.setBackupStatus(message)
         finally:
+            self.setActiveR2TransferFuture(None)
+            self.setR2CancelRequested(False)
             self.setBusy(False)
+
+    def setActiveR2TransferFuture(self, transfer_future):
+        with self._r2TransferFutureLock:
+            self._activeR2TransferFuture = transfer_future
+        if transfer_future is not None and self._r2CancelEvent.is_set():
+            transfer_future.cancel()
+
+    def setR2CancelRequested(self, requested: bool):
+        if self._r2CancelRequested != requested:
+            self._r2CancelRequested = requested
+            self.r2CancelRequestedChanged.emit()
+
+    @Slot()
+    def cancelR2Upload(self):
+        if not self._isBusy or not self._r2UploadEnabled:
+            return
+        self._r2CancelEvent.set()
+        self.setR2CancelRequested(True)
+        with self._r2TransferFutureLock:
+            transfer_future = self._activeR2TransferFuture
+        if transfer_future is not None:
+            transfer_future.cancel()
+        self.setBackupStatus("Stopping the current R2 upload...")
+        self.appendBackupLog(
+            "R2 upload cancellation requested. The current multipart transfer "
+            "is stopping; local backup files will be retained."
+        )
 
     @Slot()
     def onAutoUpdateTrigger(self):
@@ -1121,6 +1182,15 @@ class MainWindow(QObject):
         return self._isBusy
 
     isBusy = Property(bool, getIsBusy, notify=isBusyChanged)  # type: ignore
+
+    def getR2CancelRequested(self):
+        return self._r2CancelRequested
+
+    r2CancelRequested = Property(
+        bool,
+        getR2CancelRequested,
+        notify=r2CancelRequestedChanged,
+    )
 
     def getLastUpdated(self):
         return self._lastUpdated

@@ -9,7 +9,13 @@ from typing import Any, Callable, Optional
 import boto3
 import keyring
 from botocore.config import Config
+from boto3.s3.transfer import (
+    ProgressCallbackInvoker,
+    TransferConfig,
+    create_transfer_manager,
+)
 from keyring.backends.Windows import WinVaultKeyring
+from s3transfer.exceptions import CancelledError
 
 
 KEYRING_SERVICE = "GA Price Uploader Cloudflare R2"
@@ -17,6 +23,10 @@ MAX_BUCKET_BYTES = 10_000_000_000
 
 
 class R2Error(RuntimeError):
+    pass
+
+
+class R2UploadCancelled(R2Error):
     pass
 
 
@@ -314,6 +324,8 @@ def upload_backup(
     company_code: str,
     financial_year: str,
     progress_callback: Optional[Callable[[int, int, float], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
+    transfer_future_callback: Optional[Callable[[Optional[Any]], None]] = None,
     client_factory: Callable = boto3.client,
 ) -> str:
     backup_file = Path(file_path)
@@ -344,33 +356,56 @@ def upload_backup(
 
     transferred = 0
     upload_started_at = time.monotonic()
+    last_progress_reported_at = upload_started_at
     progress_lock = threading.Lock()
 
     def report_progress(increment: int) -> None:
-        nonlocal transferred
+        nonlocal last_progress_reported_at, transferred
+        if cancel_event is not None and cancel_event.is_set():
+            return
         if progress_callback is None:
             return
         with progress_lock:
             transferred = min(file_size, transferred + int(increment))
-            elapsed = max(time.monotonic() - upload_started_at, 0.25)
+            now = time.monotonic()
+            if (
+                transferred < file_size
+                and now - last_progress_reported_at < 0.1
+            ):
+                return
+            last_progress_reported_at = now
+            elapsed = max(now - upload_started_at, 0.25)
             average_speed = transferred / elapsed
             progress_callback(transferred, file_size, average_speed)
 
     object_uploaded = False
+    transfer_manager = None
+    transfer_future = None
     try:
-        client.upload_file(
+        if cancel_event is not None and cancel_event.is_set():
+            raise R2UploadCancelled("Upload canceled by user.")
+
+        transfer_manager = create_transfer_manager(client, TransferConfig())
+        transfer_future = transfer_manager.upload(
             os.fspath(backup_file),
             bucket_name,
             object_key,
-            ExtraArgs={
+            extra_args={
                 "Metadata": {
                     "company-code": company_code,
                     "financial-year": financial_year,
                 }
             },
-            Callback=report_progress,
+            subscribers=[ProgressCallbackInvoker(report_progress)],
         )
+        if transfer_future_callback is not None:
+            transfer_future_callback(transfer_future)
+        if cancel_event is not None and cancel_event.is_set():
+            transfer_future.cancel()
+        transfer_future.result()
         object_uploaded = True
+        if cancel_event is not None and cancel_event.is_set():
+            raise R2UploadCancelled("Upload canceled by user.")
         response = client.head_object(
             Bucket=bucket_name,
             Key=object_key,
@@ -387,6 +422,14 @@ def upload_backup(
                 f"{format_storage_bytes(updated_size)} in use. "
                 "Removing the newly uploaded backup."
             )
+        if cancel_event is not None and cancel_event.is_set():
+            raise R2UploadCancelled("Upload canceled by user.")
+    except CancelledError as exc:
+        if object_uploaded:
+            _delete_uploaded_object(client, bucket_name, object_key)
+        if cancel_event is not None and cancel_event.is_set():
+            raise R2UploadCancelled("Upload canceled by user.") from exc
+        raise R2Error(f"R2 upload was canceled unexpectedly: {exc}") from exc
     except R2Error:
         if object_uploaded:
             _delete_uploaded_object(client, bucket_name, object_key)
@@ -394,7 +437,17 @@ def upload_backup(
     except Exception as exc:
         if object_uploaded:
             _delete_uploaded_object(client, bucket_name, object_key)
+        if cancel_event is not None and cancel_event.is_set():
+            raise R2UploadCancelled("Upload canceled by user.") from exc
         raise R2Error(f"R2 upload failed for {backup_file.name}: {exc}") from exc
+    finally:
+        if transfer_future_callback is not None and transfer_future is not None:
+            transfer_future_callback(None)
+        if transfer_manager is not None:
+            transfer_manager.shutdown(
+                cancel=cancel_event is not None and cancel_event.is_set(),
+                cancel_msg="Upload canceled by user.",
+            )
     if progress_callback is not None and transferred != file_size:
         elapsed = max(time.monotonic() - upload_started_at, 0.25)
         progress_callback(file_size, file_size, file_size / elapsed)

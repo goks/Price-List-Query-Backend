@@ -6,6 +6,36 @@ from unittest.mock import patch
 import r2_service
 
 
+class FakeTransferFuture:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def result(self):
+        if self.cancelled:
+            raise r2_service.CancelledError()
+
+
+class FakeTransferManager:
+    def __init__(self):
+        self.future = FakeTransferFuture()
+        self.shutdown_args = None
+
+    def upload(self, file_path, bucket, key, extra_args, subscribers):
+        size = Path(file_path).stat().st_size
+        for subscriber in subscribers:
+            subscriber.on_progress(
+                future=self.future,
+                bytes_transferred=size,
+            )
+        return self.future
+
+    def shutdown(self, cancel=False, cancel_msg=""):
+        self.shutdown_args = (cancel, cancel_msg)
+
+
 class FakePaginator:
     def __init__(self, client):
         self.client = client
@@ -29,10 +59,6 @@ class FakeR2Client:
             item for item in self.objects if item["Key"] not in keys
         ]
         return {"Deleted": [{"Key": key} for key in keys]}
-
-    def upload_file(self, file_path, bucket_name, object_key, ExtraArgs, Callback):
-        Callback(1024)
-        Callback(1024)
 
     def head_object(self, Bucket, Key):
         return {"ContentLength": 2048}
@@ -121,26 +147,68 @@ class R2UploadSessionTests(unittest.TestCase):
 
     def test_upload_progress_reports_average_speed(self):
         client = FakeR2Client([])
+        manager = FakeTransferManager()
         progress = []
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "prepared.bak"
             path.write_bytes(b"x" * 2048)
-            r2_service.upload_backup(
-                str(path),
-                self.settings,
-                "secret",
-                company_code="0001",
-                financial_year="2026-2027",
-                progress_callback=lambda done, total, speed: progress.append(
-                    (done, total, speed)
-                ),
-                client_factory=lambda *_args, **_kwargs: client,
-            )
+            with patch.object(
+                r2_service,
+                "create_transfer_manager",
+                return_value=manager,
+            ):
+                r2_service.upload_backup(
+                    str(path),
+                    self.settings,
+                    "secret",
+                    company_code="0001",
+                    financial_year="2026-2027",
+                    progress_callback=lambda done, total, speed: progress.append(
+                        (done, total, speed)
+                    ),
+                    client_factory=lambda *_args, **_kwargs: client,
+                )
 
-        self.assertEqual(len(progress), 2)
+        self.assertGreaterEqual(len(progress), 1)
         self.assertEqual(progress[-1][:2], (2048, 2048))
         self.assertGreater(progress[-1][2], 0)
+
+    def test_user_cancellation_cancels_transfer_and_preserves_backup(self):
+        client = FakeR2Client([])
+        manager = FakeTransferManager()
+        cancel_event = r2_service.threading.Event()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "prepared.bak"
+            path.write_bytes(b"x" * 2048)
+            with patch.object(
+                r2_service,
+                "create_transfer_manager",
+                return_value=manager,
+            ):
+                with self.assertRaises(r2_service.R2UploadCancelled):
+                    r2_service.upload_backup(
+                        str(path),
+                        self.settings,
+                        "secret",
+                        company_code="0001",
+                        financial_year="2026-2027",
+                        cancel_event=cancel_event,
+                        transfer_future_callback=lambda future: (
+                            cancel_event.set(),
+                            future.cancel() if future is not None else None,
+                        ),
+                        client_factory=lambda *_args, **_kwargs: client,
+                    )
+
+            self.assertTrue(path.exists())
+
+        self.assertEqual(
+            manager.shutdown_args,
+            (True, "Upload canceled by user."),
+        )
+        self.assertEqual(client.deleted_keys, [])
 
 
 if __name__ == "__main__":
