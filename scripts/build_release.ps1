@@ -12,8 +12,21 @@ if (-not (Test-Path $serviceAccountFile)) {
     throw "Missing Firebase service account file at $serviceAccountFile. Restore it before building."
 }
 
+$version = python -c "from app_version import APP_VERSION; print(APP_VERSION)"
+if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Unable to read a valid application version from app_version.py."
+}
+$portableName = "Price List Update v$version.exe"
+$installerName = "Price List Update v$version-installer.exe"
+
 Write-Host "Building PyInstaller executable..."
 python -m PyInstaller --noconfirm main.spec
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed to build the portable executable."
+}
+if (-not (Test-Path (Join-Path ".\dist" $portableName))) {
+    throw "Expected portable executable was not created: $portableName"
+}
 
 Write-Host "Building NSIS installer..."
 $makensisCandidates = @(
@@ -27,6 +40,12 @@ if (-not $makensisPath) {
     throw "Unable to find makensis.exe. Ensure NSIS is installed on the runner."
 }
 
-& $makensisPath installer.nsi
+& $makensisPath "/DAPP_VERSION=$version" installer.nsi
+if ($LASTEXITCODE -ne 0) {
+    throw "NSIS failed to build the installer."
+}
+if (-not (Test-Path $installerName)) {
+    throw "Expected installer was not created: $installerName"
+}
 
-Write-Host "Build complete."
+Write-Host "Build complete: $portableName and $installerName"

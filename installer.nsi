@@ -4,6 +4,9 @@
 !define VERSIONMAJOR 1
 !define VERSIONMINOR 2
 !define VERSIONBUILD 0
+!ifndef APP_VERSION
+!define APP_VERSION "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
+!endif
 !define HELPURL "http://www.gaagencies.com"
 !define UPDATEURL "http://www.gaagencies.com"
 !define ABOUTURL "http://www.gaagencies.com"
@@ -12,7 +15,7 @@
 RequestExecutionLevel admin
 InstallDir "$PROGRAMFILES\${COMPANYNAME}\${APPNAME}"
 Name "${APPNAME}"
-outFile "${APPNAME}-installer.exe"
+outFile "${APPNAME} v${APP_VERSION}-installer.exe"
 
 !include LogicLib.nsh
 !include FileFunc.nsh
@@ -93,7 +96,7 @@ FunctionEnd
 section "install"
     # Files for the install directory - to build the installer, these should be in the same directory as the install script (this file)
     setOutPath $INSTDIR
-    file "dist\Price List Update.exe"
+    file /oname="Price List Update.exe" "dist\${APPNAME} v${APP_VERSION}.exe"
     file "icons\Price List Backend Quenry v2.ico"
 
     # Registry information for add/remove programs

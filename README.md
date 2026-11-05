@@ -154,7 +154,9 @@ Attendance document IDs are deterministic. Each import rechecks a 24-hour overla
 before the last successful attendance timestamp, checks those IDs in Firestore,
 and writes only attendance documents that do not already exist. The checkpoint
 advances only after all data writes succeed. Employee records are refreshed to
-pick up changes; device metadata is also updated.
+pick up changes; device metadata is also updated. Attendance older than 365 days
+or dated in the future is ignored, so an invalid device clock cannot advance the
+checkpoint beyond current records.
 
 The PyZK `get_attendance()` API reads the terminal's attendance list as a whole;
 it does not expose a server-side cursor for fetching only records after a
@@ -178,4 +180,4 @@ Run the focused tests with `python -m unittest discover -s tests -v`.
 - Trigger the `Version Bump` GitHub Actions workflow.
 - That workflow updates `app_version.py` and `installer.nsi`, commits the change, and creates the matching `vX.Y.Z` tag.
 - Pushing that tag automatically triggers `Build Windows Release`.
-- `Build Windows Release` builds `dist/Price List Update.exe` and `Price List Update-installer.exe`, then uploads them to the GitHub release for that tag.
+- `Build Windows Release` builds versioned portable and installer files (for example, `Price List Update v1.2.3.exe` and `Price List Update v1.2.3-installer.exe`), then uploads them to the GitHub release for that tag. The installer requests administrator elevation whenever it is launched; the portable executable does not require installation.

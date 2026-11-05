@@ -11,6 +11,7 @@ from keyring.backends.Windows import WinVaultKeyring
 
 KEYRING_SERVICE = "GA Price Uploader eTimeTrackLite"
 ATTENDANCE_OVERLAP = timedelta(days=1)
+ATTENDANCE_MAX_AGE = timedelta(days=365)
 FIRESTORE_BATCH_SIZE = 400
 
 
@@ -31,6 +32,24 @@ class DeviceSnapshot:
     employees: list[dict[str, Any]]
     attendance: list[dict[str, Any]]
     warnings: list[str]
+
+
+def _filter_attendance_records(
+    records: list[dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+) -> tuple[list[tuple[dict[str, Any], datetime]], int]:
+    now_utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    oldest_allowed = now_utc - ATTENDANCE_MAX_AGE
+    valid_records = []
+    for record in records:
+        punch_time = record.get("punch_time")
+        if not isinstance(punch_time, datetime):
+            continue
+        punch_time_utc = punch_time.astimezone(timezone.utc)
+        if oldest_allowed <= punch_time_utc <= now_utc:
+            valid_records.append((record, punch_time_utc))
+    return valid_records, len(records) - len(valid_records)
 
 
 def validate_device_settings(settings: DeviceSettings) -> None:
@@ -168,10 +187,18 @@ def read_device_snapshot(
         device_info, warnings = _read_device_info(connection, settings)
         try:
             employees = [employee_to_record(user) for user in connection.get_users()]
-            attendance = [
+            raw_attendance = [
                 attendance_to_record(record, sequence)
                 for sequence, record in enumerate(connection.get_attendance())
             ]
+            valid_attendance, ignored_count = _filter_attendance_records(raw_attendance)
+            attendance = [record for record, _ in valid_attendance]
+            if ignored_count:
+                warnings.append(
+                    f"Ignored {ignored_count} attendance record(s) older than "
+                    f"{ATTENDANCE_MAX_AGE.days} days "
+                    "or dated in the future."
+                )
         except Exception as exc:
             raise AttendanceError(f"Could not read employees or attendance from the device: {exc}") from exc
         return DeviceSnapshot(
@@ -368,8 +395,13 @@ def upload_snapshot(
             previous_checkpoint = datetime.fromisoformat(previous_checkpoint)
         except ValueError:
             previous_checkpoint = None
-    if previous_checkpoint is not None and previous_checkpoint.tzinfo is None:
-        previous_checkpoint = previous_checkpoint.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if isinstance(previous_checkpoint, datetime):
+        if previous_checkpoint.tzinfo is None:
+            previous_checkpoint = previous_checkpoint.replace(tzinfo=timezone.utc)
+        previous_checkpoint = previous_checkpoint.astimezone(timezone.utc)
+        if not now - ATTENDANCE_MAX_AGE <= previous_checkpoint <= now:
+            previous_checkpoint = None
     cutoff = (
         previous_checkpoint - ATTENDANCE_OVERLAP
         if isinstance(previous_checkpoint, datetime)
@@ -388,10 +420,11 @@ def upload_snapshot(
             )
         )
 
+    valid_attendance, _ = _filter_attendance_records(snapshot.attendance, now=now)
     attendance_records = [
         record
-        for record in snapshot.attendance
-        if cutoff is None or record["punch_time"] >= cutoff
+        for record, punch_time in valid_attendance
+        if cutoff is None or punch_time >= cutoff
     ]
     attendance_documents = []
     for record in attendance_records:
@@ -435,10 +468,10 @@ def upload_snapshot(
         ),
     )
 
-    newest_attendance = max(
-        (record["punch_time"] for record in snapshot.attendance),
-        default=previous_checkpoint,
-    )
+    checkpoint_candidates = [punch_time for _, punch_time in valid_attendance]
+    if previous_checkpoint is not None:
+        checkpoint_candidates.append(previous_checkpoint)
+    newest_attendance = max(checkpoint_candidates, default=None)
     state_ref.set(
         {
             "device_id": device_id,

@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from app_version import APP_VERSION
+
 
 root = Path.cwd()
 data_pairs = []
@@ -52,7 +54,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="Price List Update",
+    name=f"Price List Update v{APP_VERSION}",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
