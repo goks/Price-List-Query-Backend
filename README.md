@@ -26,15 +26,21 @@ The year row also shows the database's allocated SQL data-plus-log file size as
 reported by SQL Server. This is a planning reference; the resulting `.bak` size
 can differ.
 
-Enter the HomeServer destination as a UNC path, for example
-`\\HomeServer\SQLBackups`, and use **Check Share** to confirm that the SQL Server
-host can see the folder. The share and folder must already exist. Grant the SQL
-Express service account on the database host write access to the share and its
-folder; access available only to the desktop user's Windows account is not enough.
+The destination is a path on the SQL Server host, because SQL Server itself writes
+the `.bak` file. If the app is running on that same computer, a local absolute path
+such as `C:\SQLBackups` is sufficient; a UNC share is not mandatory. If the app is
+connecting remotely or the backup should go to another machine, use a UNC path
+such as `\\HomeServer\SQLBackups`. The folder must already exist. Grant the SQL
+Express service account on the database host write access to the folder or share;
+access available only to the desktop user's Windows account is not enough. Use
+**Check Folder** to confirm that SQL Server can see the destination. The folder
+check confirms visibility, while a successful backup and checksum verification
+confirms that SQL Server could write and read the backup. If Cloudflare R2 uploads
+are enabled, the app must also be able to read the completed backup at that path;
+for a remote SQL Server, this generally means using a share accessible to both
+SQL Server and the app.
 The Windows account used by the app must also be allowed to enumerate the SQL
-databases, read the company metadata, and run SQL Server backups. The folder check
-confirms visibility, while a successful backup and checksum verification confirms
-that SQL Server could write and read the backup.
+databases, read the company metadata, and run SQL Server backups.
 
 ### Connecting a remote HomeServer over Tailscale
 
@@ -58,7 +64,7 @@ Tailscale only on the desktop UI is not enough.
    path in the app, such as `\\100.x.y.z\SQLBackups` using the HomeServer guest's
    Tailscale IP, or `\\<tailnet-device-name>\SQLBackups` if MagicDNS resolves that
    name on the SQL host.
-5. In **SQL Backups**, choose **Check Share**. This checks the folder from SQL
+5. In **SQL Backups**, choose **Check Folder**. This checks the folder from SQL
    Server's point of view. Then run one manual backup and confirm the `.bak` file
    and checksum verification before relying on the daily schedule.
 

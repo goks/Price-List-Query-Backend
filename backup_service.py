@@ -217,24 +217,31 @@ def discover_databases(
         connection.close()
 
 
-def _require_unc_directory(path: str) -> str:
-    cleaned_path = path.strip()
-    drive, _tail = ntpath.splitdrive(cleaned_path)
-    share_parts = drive[2:].split("\\") if drive.startswith("\\\\") else []
-    path_parts = cleaned_path.replace("/", "\\").split("\\")
-    if (
-        not cleaned_path.startswith("\\\\")
-        or not drive.startswith("\\\\")
-        or len(share_parts) < 2
-        or not share_parts[0]
-        or not share_parts[1]
-        or ".." in path_parts
-    ):
-        raise BackupError(
-            "Use a UNC network share path (for example \\\\HomeServer\\SQLBackups)."
+def _require_backup_directory(path: str) -> str:
+    cleaned_path = path.strip().replace("/", "\\")
+    drive, tail = ntpath.splitdrive(cleaned_path)
+    path_parts = cleaned_path.split("\\")
+    is_unc_path = drive.startswith("\\\\")
+    if is_unc_path:
+        share_parts = drive[2:].split("\\")
+        is_valid_path = (
+            len(share_parts) == 2
+            and bool(share_parts[0])
+            and bool(share_parts[1])
+            and (not tail or tail.startswith("\\"))
         )
-    if not ntpath.normpath(cleaned_path).rstrip("\\"):
-        raise BackupError("A HomeServer destination folder is required.")
+    else:
+        is_valid_path = (
+            re.fullmatch(r"[A-Za-z]:", drive) is not None
+            and tail.startswith("\\")
+        )
+
+    if not cleaned_path or not is_valid_path or ".." in path_parts:
+        raise BackupError(
+            "Enter an absolute path on the SQL Server host (for example "
+            "C:\\SQLBackups) or a UNC share path (for example "
+            "\\\\HomeServer\\SQLBackups)."
+        )
     return ntpath.normpath(cleaned_path)
 
 
@@ -243,8 +250,8 @@ def _verify_server_directory(cursor, path: str) -> None:
     result = cursor.fetchone()
     if result is None or len(result) < 2 or not bool(result[1]):
         raise BackupError(
-            "SQL Server cannot see the destination folder. Confirm the UNC path "
-            "and SQL Express service-account access."
+            "SQL Server cannot see the destination folder. Confirm the path "
+            "exists on the SQL Server host and that its service account can access it."
         )
 
 
@@ -253,7 +260,7 @@ def check_destination(
     destination: str,
     connect: Callable = pyodbc.connect,
 ) -> str:
-    path = _require_unc_directory(destination)
+    path = _require_backup_directory(destination)
     connection = _connect(server, connect)
     try:
         cursor = connection.cursor()
@@ -277,7 +284,7 @@ def create_full_backup(
     if parsed is None:
         raise BackupError("The selected database name is not a supported company/year database.")
 
-    path = _require_unc_directory(destination)
+    path = _require_backup_directory(destination)
     company_code, start_year = parsed
     timestamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S_%f")
     filename = f"BusyComp{company_code}_FY{start_year}-{start_year + 1}_{timestamp}.bak"

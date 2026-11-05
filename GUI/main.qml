@@ -515,7 +515,7 @@ Window {
                                 id: backupDestinationField
                                 Layout.fillWidth: true
                                 text: backend.backupDestination
-                                placeholderText: "\\\\HomeServer\\SQLBackups"
+                                placeholderText: "C:\\SQLBackups or \\\\HomeServer\\SQLBackups"
                                 color: window.ink
                                 placeholderTextColor: "#7A8B92"
                                 font.pixelSize: 12
@@ -531,7 +531,7 @@ Window {
                             }
 
                             AppButton {
-                                text: "Check Share"
+                                text: "Check Folder"
                                 enabled: !backend.isBusy
                                 Layout.preferredWidth: 140
                                 onClicked: {
@@ -549,7 +549,7 @@ Window {
 
                         Text {
                             visible: window.expandedBackupSettings === "destination"
-                            text: "Use a UNC share. The share must exist and allow the SQL Express service account to write; a completed backup verifies write access."
+                            text: "Use an absolute path on the SQL Server host (for example C:\\SQLBackups); a UNC path is only needed for a separate network share. The folder must exist and allow the SQL Server service account to write. If R2 upload is enabled, this app must also be able to read the completed backup file."
                             wrapMode: Text.WordWrap
                             font.pixelSize: 11
                             font.family: "Poppins"

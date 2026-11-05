@@ -694,7 +694,9 @@ class MainWindow(QObject):
             self.setBackupStatus("Wait for the current database operation to finish.")
             return
         if not self._backupDestination.strip():
-            self.setBackupStatus("Enter a HomeServer UNC folder path first.")
+            self.setBackupStatus(
+                "Enter an absolute folder path on the SQL Server host first."
+            )
             return
         self.setBackupStatus("Checking destination from the SQL Server host...")
         self.setBusy(True)
@@ -841,7 +843,9 @@ class MainWindow(QObject):
             self.setBackupStatus("Select at least one company/year database.")
             return
         if not self._backupDestination.strip():
-            self.setBackupStatus("Enter a HomeServer UNC folder path first.")
+            self.setBackupStatus(
+                "Enter an absolute folder path on the SQL Server host first."
+            )
             return
 
         r2_settings: Optional[r2_service.R2Settings] = None
