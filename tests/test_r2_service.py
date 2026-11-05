@@ -30,6 +30,13 @@ class FakeR2Client:
         ]
         return {"Deleted": [{"Key": key} for key in keys]}
 
+    def upload_file(self, file_path, bucket_name, object_key, ExtraArgs, Callback):
+        Callback(1024)
+        Callback(1024)
+
+    def head_object(self, Bucket, Key):
+        return {"ContentLength": 2048}
+
 
 class R2UploadSessionTests(unittest.TestCase):
     settings = r2_service.R2Settings(
@@ -111,6 +118,29 @@ class R2UploadSessionTests(unittest.TestCase):
         self.assertEqual(result.deleted_backup_objects, 0)
         self.assertEqual(result.remaining_bucket_bytes, 10)
         self.assertEqual(client.deleted_keys, [])
+
+    def test_upload_progress_reports_average_speed(self):
+        client = FakeR2Client([])
+        progress = []
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "prepared.bak"
+            path.write_bytes(b"x" * 2048)
+            r2_service.upload_backup(
+                str(path),
+                self.settings,
+                "secret",
+                company_code="0001",
+                financial_year="2026-2027",
+                progress_callback=lambda done, total, speed: progress.append(
+                    (done, total, speed)
+                ),
+                client_factory=lambda *_args, **_kwargs: client,
+            )
+
+        self.assertEqual(len(progress), 2)
+        self.assertEqual(progress[-1][:2], (2048, 2048))
+        self.assertGreater(progress[-1][2], 0)
 
 
 if __name__ == "__main__":

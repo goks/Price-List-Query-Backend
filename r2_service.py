@@ -1,6 +1,7 @@
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -312,7 +313,7 @@ def upload_backup(
     *,
     company_code: str,
     financial_year: str,
-    progress_callback: Optional[Callable[[int, int], None]] = None,
+    progress_callback: Optional[Callable[[int, int, float], None]] = None,
     client_factory: Callable = boto3.client,
 ) -> str:
     backup_file = Path(file_path)
@@ -342,6 +343,7 @@ def upload_backup(
         )
 
     transferred = 0
+    upload_started_at = time.monotonic()
     progress_lock = threading.Lock()
 
     def report_progress(increment: int) -> None:
@@ -350,7 +352,9 @@ def upload_backup(
             return
         with progress_lock:
             transferred = min(file_size, transferred + int(increment))
-            progress_callback(transferred, file_size)
+            elapsed = max(time.monotonic() - upload_started_at, 0.25)
+            average_speed = transferred / elapsed
+            progress_callback(transferred, file_size, average_speed)
 
     object_uploaded = False
     try:
@@ -392,7 +396,8 @@ def upload_backup(
             _delete_uploaded_object(client, bucket_name, object_key)
         raise R2Error(f"R2 upload failed for {backup_file.name}: {exc}") from exc
     if progress_callback is not None and transferred != file_size:
-        progress_callback(file_size, file_size)
+        elapsed = max(time.monotonic() - upload_started_at, 0.25)
+        progress_callback(file_size, file_size, file_size / elapsed)
     return object_key
 
 

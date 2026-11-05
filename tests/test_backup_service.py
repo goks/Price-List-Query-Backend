@@ -34,18 +34,21 @@ class BackupPathValidationTests(unittest.TestCase):
 
 class BackupDestinationTests(unittest.TestCase):
     class Cursor:
-        def __init__(self):
+        def __init__(self, fetchone_results=None):
             self.executed = []
+            self.fetchone_results = list(
+                fetchone_results or [(0, 1, 0), (1, 0, 1)]
+            )
 
         def execute(self, query, *parameters):
             self.executed.append((query, parameters))
 
         def fetchone(self):
-            return (0, 1, 0)
+            return self.fetchone_results.pop(0)
 
     class Connection:
-        def __init__(self):
-            self.cursor_instance = BackupDestinationTests.Cursor()
+        def __init__(self, fetchone_results=None):
+            self.cursor_instance = BackupDestinationTests.Cursor(fetchone_results)
             self.closed = False
 
         def cursor(self):
@@ -88,6 +91,31 @@ class BackupDestinationTests(unittest.TestCase):
         self.assertEqual(
             connection.cursor_instance.executed[-1][1],
             (backup_path,),
+        )
+        self.assertIn(
+            "xp_fileexist",
+            connection.cursor_instance.executed[-2][0],
+        )
+        self.assertTrue(connection.closed)
+
+    def test_backup_reports_when_sql_server_cannot_find_created_file(self):
+        connection = self.Connection([(0, 1, 0), (0, 0, 1)])
+
+        with self.assertRaisesRegex(
+            backup_service.BackupError,
+            "completed BACKUP DATABASE but cannot find the backup file",
+        ):
+            backup_service.create_full_backup(
+                ".\\SQLEXPRESS",
+                "BusyComp0001_db12026",
+                "D:\\SQLBackups",
+                connect=lambda *_args, **_kwargs: connection,
+            )
+
+        self.assertEqual(
+            len(connection.cursor_instance.executed),
+            3,
+            "Verification should not run when SQL Server cannot see the file.",
         )
         self.assertTrue(connection.closed)
 

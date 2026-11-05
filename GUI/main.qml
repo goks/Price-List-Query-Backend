@@ -28,8 +28,9 @@ Window {
     property var expandedBackupCompanies: ({})
     property string expandedBackupSettings: ""
     property bool attendanceSettingsExpanded: false
-    property int r2TransferDone: 0
-    property int r2TransferTotal: 0
+    property real r2TransferDone: 0
+    property real r2TransferTotal: 0
+    property real r2TransferSpeed: 0
     property string r2TransferFile: ""
     property bool r2TransferActive: false
     property int attendanceTransferDone: 0
@@ -572,6 +573,12 @@ Window {
                                                / window.r2TransferTotal
                                            ) + "%"
                                          : "starting")
+                                      + " · "
+                                      + (window.r2TransferSpeed >= 1048576
+                                         ? (window.r2TransferSpeed / 1048576).toFixed(1)
+                                           + " MB/s"
+                                         : (window.r2TransferSpeed / 1024).toFixed(0)
+                                           + " KB/s")
                                 font.pixelSize: 11
                                 font.family: "Poppins Medium"
                                 color: "#31525B"
@@ -2096,9 +2103,10 @@ Window {
             }
         }
 
-        function onR2TransferChanged(done, total, fileName, active) {
+        function onR2TransferChanged(done, total, speed, fileName, active) {
             window.r2TransferDone = done
             window.r2TransferTotal = total
+            window.r2TransferSpeed = speed
             window.r2TransferFile = fileName
             window.r2TransferActive = active
         }

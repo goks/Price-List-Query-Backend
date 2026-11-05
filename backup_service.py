@@ -295,17 +295,45 @@ def create_full_backup(
     try:
         cursor = connection.cursor()
         _verify_server_directory(cursor, path)
-        cursor.execute(
-            "DECLARE @backupPath nvarchar(4000) = ?; "
-            f"BACKUP DATABASE [{escaped_name}] TO DISK = @backupPath "
-            "WITH COPY_ONLY, INIT, CHECKSUM;",
-            backup_path,
-        )
-        cursor.execute(
-            "DECLARE @backupPath nvarchar(4000) = ?; "
-            "RESTORE VERIFYONLY FROM DISK = @backupPath WITH CHECKSUM;",
-            backup_path,
-        )
+        try:
+            cursor.execute(
+                "DECLARE @backupPath nvarchar(4000) = ?; "
+                f"BACKUP DATABASE [{escaped_name}] TO DISK = @backupPath "
+                "WITH COPY_ONLY, INIT, CHECKSUM;",
+                backup_path,
+            )
+        except pyodbc.Error as exc:
+            raise BackupError(
+                f"BACKUP DATABASE failed for {backup_path}: {exc}"
+            ) from exc
+
+        try:
+            cursor.execute("EXEC master.dbo.xp_fileexist ?", backup_path)
+            backup_file = cursor.fetchone()
+        except pyodbc.Error as exc:
+            raise BackupError(
+                f"Could not check the backup file on the SQL Server host "
+                f"before verification ({backup_path}): {exc}"
+            ) from exc
+        if backup_file is None or len(backup_file) < 1 or not bool(backup_file[0]):
+            raise BackupError(
+                "SQL Server completed BACKUP DATABASE but cannot find the "
+                f"backup file before verification: {backup_path}. Check whether "
+                "another process removes the file and confirm the SQL Server "
+                "service account can access the destination."
+            )
+        try:
+            cursor.execute(
+                "DECLARE @backupPath nvarchar(4000) = ?; "
+                "RESTORE VERIFYONLY FROM DISK = @backupPath WITH CHECKSUM;",
+                backup_path,
+            )
+        except pyodbc.Error as exc:
+            raise BackupError(
+                "RESTORE VERIFYONLY failed for "
+                f"{backup_path}; SQL Server reported the file existed "
+                f"immediately before verification: {exc}"
+            ) from exc
         return backup_path
     finally:
         connection.close()

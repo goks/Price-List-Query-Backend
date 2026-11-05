@@ -126,7 +126,7 @@ class MainWindow(QObject):
     backupHistoryChanged = Signal()  # type: ignore
     r2SettingsChanged = Signal()  # type: ignore
     r2UploadEnabledChanged = Signal()  # type: ignore
-    r2TransferChanged = Signal(int, int, str, bool)
+    r2TransferChanged = Signal(float, float, float, str, bool)
     attendanceConfigChanged = Signal()
     attendanceScheduleEnabledChanged = Signal()
     attendanceStatusChanged = Signal()
@@ -946,16 +946,25 @@ class MainWindow(QObject):
                 else:
                     for database, path in prepared:
                         try:
+                            file_size = Path(path).stat().st_size
+                            self.r2TransferChanged.emit(
+                                0,
+                                file_size,
+                                0,
+                                database.name,
+                                True,
+                            )
                             object_key = r2_service.upload_backup(
                                 path,
                                 r2_settings,
                                 r2_secret,
                                 company_code=database.company_code,
                                 financial_year=database.financial_year,
-                                progress_callback=lambda done, total, name=database.name: (
+                                progress_callback=lambda done, total, speed, name=database.name: (
                                     self.r2TransferChanged.emit(
                                         done,
                                         total,
+                                        speed,
                                         name,
                                         True,
                                     )
@@ -964,6 +973,7 @@ class MainWindow(QObject):
                             self.r2TransferChanged.emit(
                                 1,
                                 1,
+                                0,
                                 database.name,
                                 False,
                             )
@@ -985,6 +995,7 @@ class MainWindow(QObject):
                                 )
                         except Exception as exc:
                             self.r2TransferChanged.emit(
+                                0,
                                 0,
                                 0,
                                 database.name,
