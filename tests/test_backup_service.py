@@ -118,17 +118,30 @@ class BackupDestinationTests(unittest.TestCase):
             (backup_path,),
         )
         self.assertIn(
-            "xp_fileexist",
-            connection.cursor_instance.executed[-2][0],
+            "RESTORE VERIFYONLY",
+            connection.cursor_instance.executed[-1][0],
+        )
+        self.assertFalse(
+            any(
+                "xp_fileexist" in query
+                for query, _parameters in connection.cursor_instance.executed[1:]
+            )
         )
         self.assertTrue(connection.closed)
 
-    def test_backup_reports_when_sql_server_cannot_find_created_file(self):
-        connection = self.Connection([(0, 1, 0), (0, 0, 1)])
+    def test_backup_reports_restore_verification_failure(self):
+        connection = self.Connection(
+            [(0, 1, 0)],
+            execute_errors={
+                3: backup_service.pyodbc.Error(
+                    "Cannot open backup device. Operating system error 2."
+                )
+            },
+        )
 
         with self.assertRaisesRegex(
             backup_service.BackupError,
-            "completed BACKUP DATABASE but cannot find the backup file",
+            "RESTORE VERIFYONLY failed",
         ):
             backup_service.create_full_backup(
                 ".\\SQLEXPRESS",
@@ -140,7 +153,11 @@ class BackupDestinationTests(unittest.TestCase):
         self.assertEqual(
             len(connection.cursor_instance.executed),
             3,
-            "Verification should not run when SQL Server cannot see the file.",
+            "RESTORE VERIFYONLY should be the file existence/readability check.",
+        )
+        self.assertIn(
+            "Cannot open backup device",
+            str(connection.cursor_instance.execute_errors[3]),
         )
         self.assertTrue(connection.closed)
 
@@ -149,7 +166,6 @@ class BackupDestinationTests(unittest.TestCase):
             message_results=[
                 [],
                 [("01000", "Processed 3202 pages for database.")],
-                [],
                 [("01000", "The backup set on file 1 is valid.")],
             ]
         )

@@ -329,24 +329,6 @@ def create_full_backup(
         _report_sql_messages(cursor, message_callback, "BACKUP DATABASE")
 
         try:
-            cursor.execute("EXEC master.dbo.xp_fileexist ?", backup_path)
-            backup_file = cursor.fetchone()
-        except pyodbc.Error as exc:
-            _report_sql_messages(cursor, message_callback, "Backup file check")
-            if message_callback is not None:
-                message_callback(f"Backup file check error: {exc}")
-            raise BackupError(
-                f"Could not check the backup file on the SQL Server host "
-                f"before verification ({backup_path}): {exc}"
-            ) from exc
-        if backup_file is None or len(backup_file) < 1 or not bool(backup_file[0]):
-            raise BackupError(
-                "SQL Server completed BACKUP DATABASE but cannot find the "
-                f"backup file before verification: {backup_path}. Check whether "
-                "another process removes the file and confirm the SQL Server "
-                "service account can access the destination."
-            )
-        try:
             cursor.execute(
                 "DECLARE @backupPath nvarchar(4000) = ?; "
                 "RESTORE VERIFYONLY FROM DISK = @backupPath WITH CHECKSUM;",
@@ -358,8 +340,7 @@ def create_full_backup(
                 message_callback(f"RESTORE VERIFYONLY error: {exc}")
             raise BackupError(
                 "RESTORE VERIFYONLY failed for "
-                f"{backup_path}; SQL Server reported the file existed "
-                f"immediately before verification: {exc}"
+                f"{backup_path}: {exc}"
             ) from exc
         _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
         return backup_path
