@@ -37,6 +37,12 @@ company metadata, and run SQL Server backups. SQL Server backup and verification
 messages, including page progress and detailed ODBC errors, are added to backup
 history when each SQL command returns.
 
+For manual troubleshooting, the **DEBUG: Backup only** switch skips the
+destination-folder precheck, `RESTORE VERIFYONLY`, and R2 uploads while enabled.
+These `.bak` files are unverified and should not be treated as usable backups.
+The switch is not saved, and scheduled backups continue with normal verification
+and upload behavior.
+
 The daily backup schedule uses the computer's local time and runs while the app
 process is running (it can remain minimized to the system tray). If the app is not
 running at the scheduled time, that day's run is skipped. Use the existing

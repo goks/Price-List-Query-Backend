@@ -123,6 +123,7 @@ class MainWindow(QObject):
     backupDestinationChanged = Signal()  # type: ignore
     backupScheduleEnabledChanged = Signal()  # type: ignore
     backupScheduleTimeChanged = Signal()  # type: ignore
+    backupDebugOnlyChanged = Signal()  # type: ignore
     backupStatusChanged = Signal()  # type: ignore
     backupHistoryChanged = Signal()  # type: ignore
     r2SettingsChanged = Signal()  # type: ignore
@@ -161,9 +162,11 @@ class MainWindow(QObject):
         self._backupDestination = ""
         self._backupScheduleEnabled = False
         self._backupScheduleTime = "02:00"
+        self._backupDebugOnly = False
         self._backupStatus = "Refresh the database list to choose company years."
         self._backupHistory: list[str] = []
         self._backupPendingAfterDiscovery = False
+        self._backupPendingDebugOnly = False
         self._r2AccountId = ""
         self._r2BucketName = ""
         self._r2AccessKeyId = ""
@@ -354,6 +357,7 @@ class MainWindow(QObject):
             self.setBackupStatus("Scheduled backup skipped because another operation is running.")
         else:
             self._backupPendingAfterDiscovery = True
+            self._backupPendingDebugOnly = False
             self.refreshBackupDatabases()
         self.startBackupSchedule()
 
@@ -646,8 +650,10 @@ class MainWindow(QObject):
             self.setBusy(False)
             if self._backupPendingAfterDiscovery:
                 self._backupPendingAfterDiscovery = False
+                debug_only = self._backupPendingDebugOnly
+                self._backupPendingDebugOnly = False
                 if discovery_succeeded:
-                    self.startBackupFromSelection()
+                    self.startBackupFromSelection(debug_only)
 
     @Slot(str, bool)
     def setBackupDatabaseSelected(self, database_name: str, selected: bool):
@@ -831,11 +837,12 @@ class MainWindow(QObject):
             )
             return
 
+        self._backupPendingDebugOnly = self._backupDebugOnly
         self._backupPendingAfterDiscovery = True
         self.setBackupStatus("Searching SQL Server for selected company/year databases...")
         self.refreshBackupDatabases()
 
-    def startBackupFromSelection(self):
+    def startBackupFromSelection(self, debug_only: bool = False):
         selected = [
             item for item in self._backupDatabases
             if item.name in self._selectedBackupDatabases
@@ -856,7 +863,7 @@ class MainWindow(QObject):
 
         r2_settings: Optional[r2_service.R2Settings] = None
         r2_secret: Optional[str] = None
-        if self._r2UploadEnabled:
+        if self._r2UploadEnabled and not debug_only:
             try:
                 r2_settings = self.getR2Settings()
                 r2_secret = r2_service.get_secret(r2_settings.access_key_id)
@@ -866,7 +873,17 @@ class MainWindow(QObject):
                 self.appendBackupLog(f"Backup not started: {exc}")
                 return
 
-        self.setBackupStatus(f"Backing up {len(selected)} database(s)...")
+        if debug_only:
+            self.setBackupStatus(
+                f"DEBUG MODE: Backing up {len(selected)} database(s) without "
+                "verification or R2 upload..."
+            )
+            self.appendBackupLog(
+                "DEBUG MODE: Manual backup only. RESTORE VERIFYONLY and R2 "
+                "upload are skipped; resulting files are unverified."
+            )
+        else:
+            self.setBackupStatus(f"Backing up {len(selected)} database(s)...")
         self._r2CancelEvent.clear()
         self.setR2CancelRequested(False)
         self.setBusy(True)
@@ -880,6 +897,7 @@ class MainWindow(QObject):
                     destination,
                     r2_settings,
                     r2_secret,
+                    debug_only,
                 )
             )
         )
@@ -891,6 +909,7 @@ class MainWindow(QObject):
         destination: str,
         r2_settings: Optional[r2_service.R2Settings] = None,
         r2_secret: Optional[str] = None,
+        debug_only: bool = False,
     ):
         completed: list[str] = []
         failures: list[str] = []
@@ -912,24 +931,41 @@ class MainWindow(QObject):
                         database.name,
                         destination,
                         message_callback=report_sql_message,
+                        verify=not debug_only,
+                        check_destination=not debug_only,
                     )
                     completed.append(path)
                     prepared.append((database, path))
-                    self.appendBackupLog(f"Created and verified {path}")
+                    if debug_only:
+                        self.appendBackupLog(
+                            f"BACKUP DATABASE completed without verification: {path}"
+                        )
+                    else:
+                        self.appendBackupLog(f"Created and verified {path}")
 
                 except Exception as exc:
                     failure = f"{database.name}: {exc}"
                     failures.append(failure)
                     self.appendBackupLog(f"Backup failed: {failure}")
 
-            if r2_settings is not None and r2_secret is not None and failures:
+            if (
+                not debug_only
+                and r2_settings is not None
+                and r2_secret is not None
+                and failures
+            ):
                 message = (
                     "Upload session canceled because one or more selected SQL "
                     "backups could not be prepared. Prepared local backups were retained."
                 )
                 cloud_failures.append(message)
                 self.appendBackupLog(message)
-            elif r2_settings is not None and r2_secret is not None and prepared:
+            elif (
+                not debug_only
+                and r2_settings is not None
+                and r2_secret is not None
+                and prepared
+            ):
                 try:
                     preflight = r2_service.prepare_upload_session(
                         [path for _database, path in prepared],
@@ -1045,18 +1081,34 @@ class MainWindow(QObject):
                 self.setBackupStatus(message)
             elif failures or cloud_failures or local_cleanup_failures:
                 first_error = failures or cloud_failures or local_cleanup_failures
-                self.setBackupStatus(
-                    f"Backups: {len(completed)} succeeded, {len(failures)} failed. "
-                    f"R2 uploads: {cloud_uploaded} succeeded, {len(cloud_failures)} failed."
-                    f" Local cleanup: {len(local_cleanup_failures)} failed."
-                    + (
-                        f" First error: {first_error[0]}"
-                        if first_error else ""
+                message = (
+                    (
+                        f"Debug backups: {len(completed)} command(s) completed, "
+                        f"{len(failures)} failed; files are unverified. "
+                        if debug_only else
+                        f"Backups: {len(completed)} succeeded, {len(failures)} failed. "
                     )
                 )
+                if not debug_only:
+                    message += (
+                        f"R2 uploads: {cloud_uploaded} succeeded, "
+                        f"{len(cloud_failures)} failed. "
+                        f"Local cleanup: {len(local_cleanup_failures)} failed."
+                    )
+                if first_error:
+                    message += f" First error: {first_error[0]}"
+                self.setBackupStatus(message)
             else:
-                message = f"Backup complete: {len(completed)} database(s) verified."
-                if r2_settings is not None:
+                if debug_only:
+                    message = (
+                        f"Debug backup run complete: {len(completed)} "
+                        "BACKUP DATABASE command(s) completed without verification."
+                    )
+                else:
+                    message = (
+                        f"Backup complete: {len(completed)} database(s) verified."
+                    )
+                if r2_settings is not None and not debug_only:
                     message += f" R2 upload complete: {cloud_uploaded} object(s)."
                 self.setBackupStatus(message)
         finally:
@@ -1405,6 +1457,22 @@ class MainWindow(QObject):
         getR2UploadEnabled,
         setR2UploadEnabled,
         notify=r2UploadEnabledChanged,
+    )  # type: ignore
+
+    def getBackupDebugOnly(self):
+        return self._backupDebugOnly
+
+    def setBackupDebugOnly(self, enabled):
+        enabled = bool(enabled)
+        if self._backupDebugOnly != enabled:
+            self._backupDebugOnly = enabled
+            self.backupDebugOnlyChanged.emit()
+
+    backupDebugOnly = Property(
+        bool,
+        getBackupDebugOnly,
+        setBackupDebugOnly,
+        notify=backupDebugOnlyChanged,
     )  # type: ignore
 
     def getAutoUpdateEnabled(self):

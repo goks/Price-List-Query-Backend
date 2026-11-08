@@ -296,6 +296,8 @@ def create_full_backup(
     now: Optional[datetime] = None,
     connect: Callable = pyodbc.connect,
     message_callback: Optional[Callable[[str], None]] = None,
+    verify: bool = True,
+    check_destination: bool = True,
 ) -> str:
     parsed = parse_database_name(database_name)
     if parsed is None:
@@ -311,7 +313,8 @@ def create_full_backup(
     connection = _connect(server, connect)
     try:
         cursor = connection.cursor()
-        _verify_server_directory(cursor, path)
+        if check_destination:
+            _verify_server_directory(cursor, path)
         try:
             cursor.execute(
                 "DECLARE @backupPath nvarchar(4000) = ?; "
@@ -327,22 +330,23 @@ def create_full_backup(
                 f"BACKUP DATABASE failed for {backup_path}: {exc}"
             ) from exc
         _report_sql_messages(cursor, message_callback, "BACKUP DATABASE")
-
-        try:
-            cursor.execute(
-                "DECLARE @backupPath nvarchar(4000) = ?; "
-                "RESTORE VERIFYONLY FROM DISK = @backupPath WITH CHECKSUM;",
-                backup_path,
-            )
-        except pyodbc.Error as exc:
+        print("PHASE-1 OK")
+        if verify:
+            try:
+                cursor.execute(
+                    "DECLARE @backupPath nvarchar(4000) = ?; "
+                    "RESTORE VERIFYONLY FROM DISK = @backupPath WITH CHECKSUM;",
+                    backup_path,
+                )
+            except pyodbc.Error as exc:
+                _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
+                if message_callback is not None:
+                    message_callback(f"RESTORE VERIFYONLY error: {exc}")
+                raise BackupError(
+                    "RESTORE VERIFYONLY failed for "
+                    f"{backup_path}: {exc}"
+                ) from exc
             _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
-            if message_callback is not None:
-                message_callback(f"RESTORE VERIFYONLY error: {exc}")
-            raise BackupError(
-                "RESTORE VERIFYONLY failed for "
-                f"{backup_path}: {exc}"
-            ) from exc
-        _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
         return backup_path
     finally:
         connection.close()

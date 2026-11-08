@@ -161,6 +161,38 @@ class BackupDestinationTests(unittest.TestCase):
         )
         self.assertTrue(connection.closed)
 
+    def test_backup_can_skip_verification(self):
+        connection = self.Connection()
+
+        backup_path = backup_service.create_full_backup(
+            ".\\SQLEXPRESS",
+            "BusyComp0001_db12026",
+            "D:\\SQLBackups",
+            connect=lambda *_args, **_kwargs: connection,
+            verify=False,
+            check_destination=False,
+        )
+
+        self.assertTrue(backup_path.startswith("D:\\SQLBackups\\"))
+        self.assertEqual(len(connection.cursor_instance.executed), 1)
+        self.assertIn(
+            "BACKUP DATABASE",
+            connection.cursor_instance.executed[-1][0],
+        )
+        self.assertFalse(
+            any(
+                "xp_fileexist" in query
+                for query, _parameters in connection.cursor_instance.executed
+            )
+        )
+        self.assertFalse(
+            any(
+                "RESTORE VERIFYONLY" in query
+                for query, _parameters in connection.cursor_instance.executed
+            )
+        )
+        self.assertTrue(connection.closed)
+
     def test_backup_reports_sql_server_messages(self):
         connection = self.Connection(
             message_results=[

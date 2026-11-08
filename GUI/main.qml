@@ -937,6 +937,36 @@ Window {
 
                         RowLayout {
                             Layout.fillWidth: true
+                            spacing: 10
+
+                            Switch {
+                                checked: backend.backupDebugOnly
+                                enabled: !backend.isBusy
+                                onToggled: backend.backupDebugOnly = checked
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Text {
+                                    text: "DEBUG: Backup only"
+                                    font.pixelSize: 12
+                                    font.family: "Poppins SemiBold"
+                                    color: "#8A4B18"
+                                }
+                                Text {
+                                    text: "Manual runs only. Skips folder precheck, RESTORE VERIFYONLY, and R2 upload; the file is unverified. Scheduled backups are unchanged."
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 10
+                                    font.family: "Poppins"
+                                    color: "#8A4B18"
+                                    Layout.fillWidth: true
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
                             spacing: 12
 
                             AppButton {
