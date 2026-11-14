@@ -255,6 +255,10 @@ def _verify_server_directory(cursor, path: str) -> None:
         )
 
 
+def _sql_nvarchar_literal(value: str) -> str:
+    return "N'" + value.replace("'", "''") + "'"
+
+
 def _report_sql_messages(
     cursor,
     message_callback: Optional[Callable[[str], None]],
@@ -309,6 +313,7 @@ def create_full_backup(
     filename = f"BusyComp{company_code}_FY{start_year}-{start_year + 1}_{timestamp}.bak"
     backup_path = ntpath.join(path, filename)
     escaped_name = database_name.replace("]", "]]")
+    backup_path_literal = _sql_nvarchar_literal(backup_path)
 
     connection = _connect(server, connect)
     try:
@@ -317,10 +322,9 @@ def create_full_backup(
             _verify_server_directory(cursor, path)
         try:
             cursor.execute(
-                "DECLARE @backupPath nvarchar(4000) = ?; "
+                f"DECLARE @backupPath nvarchar(4000) = {backup_path_literal}; "
                 f"BACKUP DATABASE [{escaped_name}] TO DISK = @backupPath "
                 "WITH COPY_ONLY, INIT, CHECKSUM;",
-                backup_path,
             )
         except pyodbc.Error as exc:
             _report_sql_messages(cursor, message_callback, "BACKUP DATABASE")
@@ -334,9 +338,8 @@ def create_full_backup(
         if verify:
             try:
                 cursor.execute(
-                    "DECLARE @backupPath nvarchar(4000) = ?; "
+                    f"DECLARE @backupPath nvarchar(4000) = {backup_path_literal}; "
                     "RESTORE VERIFYONLY FROM DISK = @backupPath WITH CHECKSUM;",
-                    backup_path,
                 )
             except pyodbc.Error as exc:
                 _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")

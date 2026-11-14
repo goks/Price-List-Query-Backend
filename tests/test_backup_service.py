@@ -115,11 +115,19 @@ class BackupDestinationTests(unittest.TestCase):
         )
         self.assertEqual(
             connection.cursor_instance.executed[-1][1],
-            (backup_path,),
+            (),
         )
         self.assertIn(
             "RESTORE VERIFYONLY",
             connection.cursor_instance.executed[-1][0],
+        )
+        self.assertIn(
+            f"= N'{backup_path}';",
+            connection.cursor_instance.executed[-1][0],
+        )
+        self.assertIn(
+            f"= N'{backup_path}';",
+            connection.cursor_instance.executed[-2][0],
         )
         self.assertFalse(
             any(
@@ -127,6 +135,22 @@ class BackupDestinationTests(unittest.TestCase):
                 for query, _parameters in connection.cursor_instance.executed[1:]
             )
         )
+        self.assertTrue(connection.closed)
+
+    def test_backup_escapes_quotes_in_sql_path_literal(self):
+        connection = self.Connection()
+
+        backup_path = backup_service.create_full_backup(
+            ".\\SQLEXPRESS",
+            "BusyComp0001_db12026",
+            "D:\\SQL's Backups",
+            connect=lambda *_args, **_kwargs: connection,
+        )
+
+        escaped_literal = "N'" + backup_path.replace("'", "''") + "'"
+        for query, parameters in connection.cursor_instance.executed[1:]:
+            self.assertEqual(parameters, ())
+            self.assertIn(escaped_literal, query)
         self.assertTrue(connection.closed)
 
     def test_backup_reports_restore_verification_failure(self):
