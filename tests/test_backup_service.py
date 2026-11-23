@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import backup_service
 
@@ -34,6 +35,8 @@ class BackupPathValidationTests(unittest.TestCase):
 
 class BackupDestinationTests(unittest.TestCase):
     class Cursor:
+        """Fake cursor whose canned responses are keyed by statement text."""
+
         def __init__(
             self,
             fetchone_results=None,
@@ -41,26 +44,39 @@ class BackupDestinationTests(unittest.TestCase):
             execute_errors=None,
         ):
             self.executed = []
-            self.fetchone_results = list(
-                fetchone_results or [(0, 1, 0), (1, 0, 1)]
-            )
-            self.message_results = list(message_results or [])
-            self.execute_errors = execute_errors or {}
+            self.fetchone_results = list(fetchone_results or [(0, 1, 0)])
+            self.message_results = dict(message_results or {})
+            self.execute_errors = dict(execute_errors or {})
             self.messages = []
+
+        @staticmethod
+        def _lookup(mapping, query, default):
+            for needle, value in mapping.items():
+                if needle in query:
+                    return value
+            return default
 
         def execute(self, query, *parameters):
             self.executed.append((query, parameters))
-            execute_index = len(self.executed)
-            self.messages = (
-                self.message_results[execute_index - 1]
-                if execute_index <= len(self.message_results)
-                else []
-            )
-            if execute_index in self.execute_errors:
-                raise self.execute_errors[execute_index]
+            self.messages = list(self._lookup(self.message_results, query, []))
+            error = self._lookup(self.execute_errors, query, None)
+            if isinstance(error, list):
+                error = error.pop(0) if error else None
+            if error is not None:
+                raise error
 
         def fetchone(self):
+            query = self.executed[-1][0]
+            if "@@SPID" in query:
+                return (55,)
+            if "HAS_PERMS_BY_NAME" in query:
+                return (1,)
+            if "sys.dm_exec_requests" in query:
+                return (0,)
             return self.fetchone_results.pop(0)
+
+        def statements(self):
+            return [query for query, _parameters in self.executed]
 
     class Connection:
         def __init__(
@@ -82,6 +98,10 @@ class BackupDestinationTests(unittest.TestCase):
 
         def close(self):
             self.closed = True
+
+    @staticmethod
+    def statement(statements, prefix):
+        return next(query for query in statements if query.startswith(prefix))
 
     def test_check_accepts_local_path_on_sql_host(self):
         connection = self.Connection()
@@ -110,31 +130,21 @@ class BackupDestinationTests(unittest.TestCase):
         )
 
         self.assertTrue(backup_path.startswith("D:\\SQLBackups\\"))
-        self.assertEqual(
-            connection.cursor_instance.executed[0][1],
+        statements = connection.cursor_instance.statements()
+        self.assertIn(
             ("D:\\SQLBackups",),
-        )
-        self.assertEqual(
-            connection.cursor_instance.executed[-1][1],
-            (),
-        )
-        self.assertIn(
-            "RESTORE VERIFYONLY",
-            connection.cursor_instance.executed[-1][0],
-        )
-        self.assertIn(
-            f"FROM DISK = N'{backup_path}'",
-            connection.cursor_instance.executed[-1][0],
+            [
+                parameters for query, parameters in connection.cursor_instance.executed
+                if query.startswith("EXEC master.dbo.xp_fileexist")
+            ],
         )
         self.assertIn(
             f"TO DISK = N'{backup_path}'",
-            connection.cursor_instance.executed[-2][0],
+            self.statement(statements, "BACKUP DATABASE"),
         )
-        self.assertFalse(
-            any(
-                "xp_fileexist" in query
-                for query, _parameters in connection.cursor_instance.executed[1:]
-            )
+        self.assertIn(
+            f"FROM DISK = N'{backup_path}'",
+            self.statement(statements, "RESTORE VERIFYONLY"),
         )
         self.assertTrue(connection.closed)
 
@@ -149,7 +159,9 @@ class BackupDestinationTests(unittest.TestCase):
         )
 
         escaped_literal = "N'" + backup_path.replace("'", "''") + "'"
-        for query, parameters in connection.cursor_instance.executed[1:]:
+        for query, parameters in connection.cursor_instance.executed:
+            if not query.startswith(("BACKUP DATABASE", "RESTORE VERIFYONLY")):
+                continue
             self.assertEqual(parameters, ())
             self.assertIn(escaped_literal, query)
         self.assertTrue(connection.closed)
@@ -164,23 +176,51 @@ class BackupDestinationTests(unittest.TestCase):
             connect=lambda *_args, **_kwargs: connection,
         )
 
-        backup_query = connection.cursor_instance.executed[-2][0]
-        verify_query = connection.cursor_instance.executed[-1][0]
-        self.assertTrue(backup_query.startswith("BACKUP DATABASE"))
-        self.assertTrue(verify_query.startswith("RESTORE VERIFYONLY"))
-        for query in (backup_query, verify_query):
+        statements = connection.cursor_instance.statements()
+        for prefix in ("BACKUP DATABASE", "RESTORE VERIFYONLY"):
+            query = self.statement(statements, prefix)
             # pyodbc frees the previous statement before the next execute(), which
             # cancels the still-running later statements of a batch.
             self.assertEqual(query.count(";"), 1, query)
             self.assertNotIn("DECLARE", query)
         self.assertTrue(connection.autocommit)
 
+    def test_backup_verifies_on_a_second_connection_after_sql_server_finishes(self):
+        connections = []
+
+        def connect(*_args, **_kwargs):
+            connections.append(self.Connection())
+            return connections[-1]
+
+        backup_service.create_full_backup(
+            ".\\SQLEXPRESS",
+            "BusyComp0001_db12026",
+            "D:\\SQLBackups",
+            connect=connect,
+        )
+
+        backup_connection, verify_connection = connections
+        self.assertIsNot(backup_connection, verify_connection)
+        self.assertTrue(
+            backup_connection.cursor_instance.statements()[-1].startswith(
+                "BACKUP DATABASE"
+            )
+        )
+        # The backup statement must be left alone until SQL Server reports that
+        # the session has no active request left.
+        verify_statements = verify_connection.cursor_instance.statements()
+        self.assertIn("HAS_PERMS_BY_NAME", verify_statements[0])
+        self.assertIn("FROM sys.dm_exec_requests", verify_statements[1])
+        self.assertTrue(verify_statements[-1].startswith("RESTORE VERIFYONLY"))
+        self.assertTrue(backup_connection.closed)
+        self.assertTrue(verify_connection.closed)
+
     def test_backup_reports_restore_verification_failure(self):
         connection = self.Connection(
             [(0, 1, 0)],
             execute_errors={
-                3: backup_service.pyodbc.Error(
-                    "Cannot open backup device. Operating system error 2."
+                "RESTORE VERIFYONLY": backup_service.pyodbc.Error(
+                    "The backup set on file 1 is invalid."
                 )
             },
         )
@@ -196,14 +236,44 @@ class BackupDestinationTests(unittest.TestCase):
                 connect=lambda *_args, **_kwargs: connection,
             )
 
+        statements = connection.cursor_instance.statements()
         self.assertEqual(
-            len(connection.cursor_instance.executed),
-            3,
+            sum(
+                query.startswith("RESTORE VERIFYONLY")
+                for query in statements
+            ),
+            1,
             "RESTORE VERIFYONLY should be the file existence/readability check.",
         )
-        self.assertIn(
-            "Cannot open backup device",
-            str(connection.cursor_instance.execute_errors[3]),
+        self.assertTrue(connection.closed)
+
+    def test_backup_retries_verification_until_the_file_is_ready(self):
+        connection = self.Connection(
+            execute_errors={
+                "RESTORE VERIFYONLY": [
+                    backup_service.pyodbc.Error(
+                        "Cannot open backup device. Operating system error 2."
+                    ),
+                    None,
+                ]
+            },
+        )
+
+        with mock.patch.object(backup_service.time, "sleep"):
+            backup_path = backup_service.create_full_backup(
+                ".\\SQLEXPRESS",
+                "BusyComp0001_db12026",
+                "D:\\SQLBackups",
+                connect=lambda *_args, **_kwargs: connection,
+            )
+
+        self.assertTrue(backup_path.startswith("D:\\SQLBackups\\"))
+        self.assertEqual(
+            sum(
+                query.startswith("RESTORE VERIFYONLY")
+                for query in connection.cursor_instance.statements()
+            ),
+            2,
         )
         self.assertTrue(connection.closed)
 
@@ -220,32 +290,29 @@ class BackupDestinationTests(unittest.TestCase):
         )
 
         self.assertTrue(backup_path.startswith("D:\\SQLBackups\\"))
-        self.assertEqual(len(connection.cursor_instance.executed), 1)
-        self.assertIn(
-            "BACKUP DATABASE",
-            connection.cursor_instance.executed[-1][0],
+        statements = connection.cursor_instance.statements()
+        self.assertTrue(statements[0].startswith("SELECT @@SPID"))
+        self.assertTrue(
+            any(query.startswith("BACKUP DATABASE") for query in statements)
         )
         self.assertFalse(
-            any(
-                "xp_fileexist" in query
-                for query, _parameters in connection.cursor_instance.executed
-            )
+            any("xp_fileexist" in query for query in statements)
         )
         self.assertFalse(
-            any(
-                "RESTORE VERIFYONLY" in query
-                for query, _parameters in connection.cursor_instance.executed
-            )
+            any("RESTORE VERIFYONLY" in query for query in statements)
         )
         self.assertTrue(connection.closed)
 
     def test_backup_reports_sql_server_messages(self):
         connection = self.Connection(
-            message_results=[
-                [],
-                [("01000", "Processed 3202 pages for database.")],
-                [("01000", "The backup set on file 1 is valid.")],
-            ]
+            message_results={
+                "BACKUP DATABASE": [
+                    ("01000", "Processed 3202 pages for database.")
+                ],
+                "RESTORE VERIFYONLY": [
+                    ("01000", "The backup set on file 1 is valid.")
+                ],
+            }
         )
         messages = []
 
@@ -267,12 +334,15 @@ class BackupDestinationTests(unittest.TestCase):
 
     def test_backup_reports_sql_server_messages_when_backup_fails(self):
         connection = self.Connection(
-            message_results=[
-                [],
-                [("01000", "Error: 3201, Cannot open backup device.")],
-            ],
+            message_results={
+                "BACKUP DATABASE": [
+                    ("01000", "Error: 3201, Cannot open backup device.")
+                ],
+            },
             execute_errors={
-                2: backup_service.pyodbc.Error("Operating system error 5.")
+                "BACKUP DATABASE": backup_service.pyodbc.Error(
+                    "Operating system error 5."
+                )
             },
         )
         messages = []

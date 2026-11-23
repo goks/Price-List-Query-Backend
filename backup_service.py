@@ -1,5 +1,6 @@
 import ntpath
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable, Optional
@@ -259,6 +260,48 @@ def _sql_nvarchar_literal(value: str) -> str:
     return "N'" + value.replace("'", "''") + "'"
 
 
+_NOT_READY_PATTERN = re.compile(
+    r"Cannot open backup device|Operating system error (?:2|3|32|33)\b",
+    re.IGNORECASE,
+)
+
+
+def _wait_for_server_side_completion(
+    cursor,
+    session_id: int,
+    timeout_seconds: float = 120.0,
+) -> None:
+    """Block until SQL Server has no active request left for the backup session.
+
+    SQL Server reports a BACKUP statement as finished before it has flushed and
+    closed the backup file. Releasing the statement during that window (the next
+    execute() or closing the connection) makes the driver cancel the operation,
+    so SQL Server aborts the backup with error 3204 and deletes the half-written
+    file. Waiting on the request from another connection avoids that cancel.
+    """
+    cursor.execute("SELECT HAS_PERMS_BY_NAME(NULL, NULL, N'VIEW SERVER STATE')")
+    if not int(cursor.fetchone()[0] or 0):
+        # Without VIEW SERVER STATE a session can only see itself, so fall back
+        # to giving the file write time to settle.
+        time.sleep(2.0)
+        return
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        cursor.execute(
+            "SELECT COUNT(*) FROM sys.dm_exec_requests WHERE session_id = ?",
+            session_id,
+        )
+        pending = int(cursor.fetchone()[0] or 0)
+        if pending == 0:
+            return
+        if time.monotonic() >= deadline:
+            raise BackupError(
+                "SQL Server did not finish writing the backup file in time."
+            )
+        time.sleep(0.05)
+
+
 def _report_sql_messages(
     cursor,
     message_callback: Optional[Callable[[str], None]],
@@ -273,6 +316,35 @@ def _report_sql_messages(
             message_text = str(message).strip()
         if message_text:
             message_callback(f"{operation}: {message_text}")
+
+
+def _verify_backup_file(
+    cursor,
+    backup_path: str,
+    backup_path_literal: str,
+    message_callback: Optional[Callable[[str], None]],
+    timeout_seconds: float = 60.0,
+) -> None:
+    """Run RESTORE VERIFYONLY, retrying while the backup file is still settling."""
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            cursor.execute(
+                f"RESTORE VERIFYONLY FROM DISK = {backup_path_literal} "
+                "WITH CHECKSUM;",
+            )
+            return
+        except pyodbc.Error as exc:
+            not_ready = _NOT_READY_PATTERN.search(str(exc)) is not None
+            if not_ready and time.monotonic() < deadline:
+                time.sleep(0.2)
+                continue
+            _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
+            if message_callback is not None:
+                message_callback(f"RESTORE VERIFYONLY error: {exc}")
+            raise BackupError(
+                f"RESTORE VERIFYONLY failed for {backup_path}: {exc}"
+            ) from exc
 
 
 def check_destination(
@@ -316,9 +388,18 @@ def create_full_backup(
     backup_path_literal = _sql_nvarchar_literal(backup_path)
 
     connection = _connect(server, connect)
+    observer = None
     try:
         connection.autocommit = True
         cursor = connection.cursor()
+        cursor.execute("SELECT @@SPID")
+        session_id = int(cursor.fetchone()[0])
+
+        # Opened up front so the wait below can never be blocked by a failed login.
+        observer = _connect(server, connect)
+        observer.autocommit = True
+        observer_cursor = observer.cursor()
+
         if check_destination:
             _verify_server_directory(cursor, path)
         # Each command must be its own batch. pyodbc frees the previous statement
@@ -338,21 +419,17 @@ def create_full_backup(
                 f"BACKUP DATABASE failed for {backup_path}: {exc}"
             ) from exc
         _report_sql_messages(cursor, message_callback, "BACKUP DATABASE")
+        _wait_for_server_side_completion(observer_cursor, session_id)
         if verify:
-            try:
-                cursor.execute(
-                    f"RESTORE VERIFYONLY FROM DISK = {backup_path_literal} "
-                    "WITH CHECKSUM;",
-                )
-            except pyodbc.Error as exc:
-                _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
-                if message_callback is not None:
-                    message_callback(f"RESTORE VERIFYONLY error: {exc}")
-                raise BackupError(
-                    "RESTORE VERIFYONLY failed for "
-                    f"{backup_path}: {exc}"
-                ) from exc
-            _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")
+            _verify_backup_file(
+                observer_cursor,
+                backup_path,
+                backup_path_literal,
+                message_callback,
+            )
+            _report_sql_messages(observer_cursor, message_callback, "RESTORE VERIFYONLY")
         return backup_path
     finally:
+        if observer is not None:
+            observer.close()
         connection.close()
