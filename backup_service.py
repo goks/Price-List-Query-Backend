@@ -317,13 +317,17 @@ def create_full_backup(
 
     connection = _connect(server, connect)
     try:
+        connection.autocommit = True
         cursor = connection.cursor()
         if check_destination:
             _verify_server_directory(cursor, path)
+        # Each command must be its own batch. pyodbc frees the previous statement
+        # before the next execute(), and the SQL Server driver answers that by
+        # cancelling a batch whose later statements are still running, which makes
+        # "DECLARE ...; BACKUP ...;" abort its own backup (error 3204).
         try:
             cursor.execute(
-                f"DECLARE @backupPath nvarchar(4000) = {backup_path_literal}; "
-                f"BACKUP DATABASE [{escaped_name}] TO DISK = @backupPath "
+                f"BACKUP DATABASE [{escaped_name}] TO DISK = {backup_path_literal} "
                 "WITH COPY_ONLY, INIT, CHECKSUM;",
             )
         except pyodbc.Error as exc:
@@ -334,12 +338,11 @@ def create_full_backup(
                 f"BACKUP DATABASE failed for {backup_path}: {exc}"
             ) from exc
         _report_sql_messages(cursor, message_callback, "BACKUP DATABASE")
-        print("PHASE-1 OK")
         if verify:
             try:
                 cursor.execute(
-                    f"DECLARE @backupPath nvarchar(4000) = {backup_path_literal}; "
-                    "RESTORE VERIFYONLY FROM DISK = @backupPath WITH CHECKSUM;",
+                    f"RESTORE VERIFYONLY FROM DISK = {backup_path_literal} "
+                    "WITH CHECKSUM;",
                 )
             except pyodbc.Error as exc:
                 _report_sql_messages(cursor, message_callback, "RESTORE VERIFYONLY")

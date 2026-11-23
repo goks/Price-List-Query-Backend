@@ -75,6 +75,7 @@ class BackupDestinationTests(unittest.TestCase):
                 execute_errors,
             )
             self.closed = False
+            self.autocommit = False
 
         def cursor(self):
             return self.cursor_instance
@@ -122,11 +123,11 @@ class BackupDestinationTests(unittest.TestCase):
             connection.cursor_instance.executed[-1][0],
         )
         self.assertIn(
-            f"= N'{backup_path}';",
+            f"FROM DISK = N'{backup_path}'",
             connection.cursor_instance.executed[-1][0],
         )
         self.assertIn(
-            f"= N'{backup_path}';",
+            f"TO DISK = N'{backup_path}'",
             connection.cursor_instance.executed[-2][0],
         )
         self.assertFalse(
@@ -152,6 +153,27 @@ class BackupDestinationTests(unittest.TestCase):
             self.assertEqual(parameters, ())
             self.assertIn(escaped_literal, query)
         self.assertTrue(connection.closed)
+
+    def test_backup_runs_each_command_as_its_own_batch(self):
+        connection = self.Connection()
+
+        backup_service.create_full_backup(
+            ".\\SQLEXPRESS",
+            "BusyComp0001_db12026",
+            "D:\\SQLBackups",
+            connect=lambda *_args, **_kwargs: connection,
+        )
+
+        backup_query = connection.cursor_instance.executed[-2][0]
+        verify_query = connection.cursor_instance.executed[-1][0]
+        self.assertTrue(backup_query.startswith("BACKUP DATABASE"))
+        self.assertTrue(verify_query.startswith("RESTORE VERIFYONLY"))
+        for query in (backup_query, verify_query):
+            # pyodbc frees the previous statement before the next execute(), which
+            # cancels the still-running later statements of a batch.
+            self.assertEqual(query.count(";"), 1, query)
+            self.assertNotIn("DECLARE", query)
+        self.assertTrue(connection.autocommit)
 
     def test_backup_reports_restore_verification_failure(self):
         connection = self.Connection(
