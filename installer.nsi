@@ -4,8 +4,8 @@ RequestExecutionLevel admin
 !define COMPANYNAME "Neo Productions"
 !define DESCRIPTION "Price List Updater Application"
 !define VERSIONMAJOR 1
-!define VERSIONMINOR 3
-!define VERSIONBUILD 8
+!define VERSIONMINOR 4
+!define VERSIONBUILD 0
 !ifndef APP_VERSION
 !define APP_VERSION "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !endif
