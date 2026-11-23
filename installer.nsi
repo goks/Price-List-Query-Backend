@@ -5,7 +5,7 @@ RequestExecutionLevel admin
 !define DESCRIPTION "Price List Updater Application"
 !define VERSIONMAJOR 1
 !define VERSIONMINOR 3
-!define VERSIONBUILD 7
+!define VERSIONBUILD 8
 !ifndef APP_VERSION
 !define APP_VERSION "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !endif
