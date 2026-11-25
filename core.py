@@ -349,8 +349,9 @@ def delete_all_documents_in_batches(collection_ref, log_func=None, on_progress=N
 
     return total_deleted
 
-def clear_and_full_upload(log_func=print, on_progress=None):
+def clear_and_full_upload(log_func=print, on_progress=None, reporter=None):
     logs = []
+    reporter = reporter or _NullReporter()
     def log(msg):
         logs.append(msg)
         log_func(msg)
@@ -361,16 +362,20 @@ def clear_and_full_upload(log_func=print, on_progress=None):
     sensitive_items_ref = SENSITIVE_ITEMS_COL
 
     # Step 1: Delete in batches
+    reporter.stage("Deleting existing items", 1, 4)
     total_deleted_items = delete_all_documents_in_batches(items_ref, log_func=log, on_progress=on_progress)
     log(f"✅ Deleted {total_deleted_items} items from Firestore.")
     total_deleted_sensitive = delete_all_documents_in_batches(sensitive_items_ref, log_func=log, on_progress=on_progress)
     log(f"✅ Deleted {total_deleted_sensitive} sensitive documents from Firestore.")
+    reporter.count("deleted", total_deleted_items)
 
     # Step 2: Upload items and images
     all_items = get_all_items()
     total_items = len(all_items)
     updated_images = 0
     log(f"📦 Uploading {total_items} items...")
+    reporter.stage("Uploading items", 2, 4)
+    reporter.progress(0, total_items)
 
     for i in range(0, total_items, 500):
         batch = firestore_db.batch()
@@ -394,17 +399,20 @@ def clear_and_full_upload(log_func=print, on_progress=None):
         batch.commit()
         uploaded = min(i + 500, total_items)
         log(f"✅ Uploaded {uploaded}/{total_items} items")
+        reporter.progress(uploaded, total_items)
         if on_progress:
             on_progress(uploaded, total_items)
 
-
+    reporter.count("items", total_items)
     # ACTIVE MASTER CODES LIST
+    reporter.stage("Publishing active item ids", 3, 4)
     active_sql_ids = set(str(id) for id in get_all_ids())
     upload_active_ids_to_firestore(active_sql_ids)
     summary = f"✅ Uploaded {len(active_sql_ids)} active_sql_ids "
-    log_output.append(summary)
+    log(summary)
     logging.info(summary)
     # Step 3: Update sync timestamp
+    reporter.stage("Updating sync metadata", 4, 4)
     now = datetime.datetime.utcnow()
     META_DOC.update({"latestImportFromServer": now.isoformat()})
     log(f"🕓 Completed at {now} UTC")
@@ -416,13 +424,34 @@ def clear_and_full_upload(log_func=print, on_progress=None):
 
 
 # --- Main Upload Logic ---
-def run_sync():
+class _NullReporter:
+    """Stand-in so sync code can report progress without a reporter."""
+
+    def stage(self, *_args, **_kwargs):
+        pass
+
+    def progress(self, *_args, **_kwargs):
+        pass
+
+    def count(self, *_args, **_kwargs):
+        pass
+
+
+def run_sync(reporter=None, log_callback=None):
     global log_output
     log_output.clear()
+    reporter = reporter or _NullReporter()
+
+    def log(message: str) -> None:
+        log_output.append(message)
+        if log_callback is not None:
+            log_callback(message)
+
     # Local cache filename for Firestore IDs
     local_ids_file = FIRESTORE_IDS_FILE
     # Check for existing stock snapshot and compare stock changes
     snapshot_file = SNAPSHOT_FILE
+    reporter.stage("Loading stock snapshot", 1, 12)
     # Load previous snapshot or create in-memory if missing
     now = datetime.datetime.utcnow()
     if os.path.exists(snapshot_file):
@@ -432,11 +461,13 @@ def run_sync():
         except Exception:
             prev_snapshot = fetch_item_stocks_details()
     else:
-        log_output.append("📊 Stock snapshot not found, creating initial in-memory snapshot...")
+        log("📊 Stock snapshot not found, creating initial in-memory snapshot...")
         prev_snapshot = fetch_item_stocks_details()
     # Fetch current snapshot in-memory
+    reporter.stage("Reading current stock", 2, 12)
     current_snapshot = fetch_item_stocks_details()
     # Compare previous and current stocks
+    reporter.stage("Comparing stock changes", 3, 12)
     prev_map = {item['MasterCode']: item['Stock'] for item in prev_snapshot}
     changes = []
     for item in current_snapshot:
@@ -448,10 +479,11 @@ def run_sync():
         # only record items with stock delta >=10 
         if abs(delta) >= 10:
             changes.append((code, name, prev, curr, delta))
-    log_output.append(f"📊 Significant stock change (>=10): {len(changes)} items")
+    log(f"📊 Significant stock change (>=10): {len(changes)} items")
     for code, name, prev, curr, delta in changes:
-        log_output.append(f" - {code} ({name}): {prev} -> {curr} (Δ{delta})")
+        log(f" - {code} ({name}): {prev} -> {curr} (Δ{delta})")
     # Publish changes to Firestore for app consumption
+    reporter.stage("Publishing stock changes", 4, 12)
     try:
         stock_changes_doc = firestore_db.collection("DB_Service").document("stock_changes_snapshot")
         stock_changes_doc.set({
@@ -475,14 +507,15 @@ def run_sync():
                     merge=True
                 )
             stock_batch.commit()
-            log_output.append(f"🟢 Updated stock and FB timestamps for {len(changes)} item docs in Firestore.")
+            log(f"🟢 Updated stock and FB timestamps for {len(changes)} item docs in Firestore.")
 
-        log_output.append("✅ Published stock changes to Firestore.")
+        log("✅ Published stock changes to Firestore.")
     except Exception as e:
-        log_output.append(f"❌ Failed to publish stock changes or update item docs: {e}")
+        log(f"❌ Failed to publish stock changes or update item docs: {e}")
     
 
     # Get previous timestamp from Firestore meta
+    reporter.stage("Reading last sync checkpoint", 5, 12)
     meta_dict = META_DOC.get().to_dict()
     prev_str = meta_dict.get("latestImportFromServer") if meta_dict else None  # type: ignore
     if isinstance(prev_str, datetime.datetime):
@@ -496,6 +529,7 @@ def run_sync():
     prev -= datetime.timedelta(seconds=5)
 
     # --- Fetch data from SQL ---
+    reporter.stage("Fetching master data", 6, 12)
     conn = connect_to_sql()
     cur = conn.cursor()
     units = fetch_units(cur)
@@ -504,6 +538,9 @@ def run_sync():
     items = fetch_items(cur, prev)
 
     updated_images = []
+    total_items = len(items)
+    reporter.stage("Uploading items", 7, 12)
+    reporter.progress(0, total_items)
 
     # Initialize Firestore batch and operation counter
     batch = firestore_db.batch()
@@ -518,14 +555,15 @@ def run_sync():
 
     sensitive_ref = SENSITIVE_ITEMS_COL
 
-    for row in items:
+    for index, row in enumerate(items, start=1):
         doc_id = str(row.Code)
         if row.DeactiveMaster or row.BlockedMaster:
             batch.delete(ITEMS_COL.document(doc_id))
             batch.delete(sensitive_ref.document(doc_id))
-            log_output.append(f"🗑️ Deleted {row.Name} (deactivated or blocked)")
+            log(f"🗑️ Deleted {row.Name} (deactivated or blocked)")
             op_count += 2
             commit_if_needed()
+            reporter.progress(index, total_items)
             continue
         
         data, img, ext = build_item(row, units, groups, taxes, now)
@@ -533,7 +571,7 @@ def run_sync():
 
         batch.set(ITEMS_COL.document(str(data["MasterCode"])), data)
         batch.set(sensitive_ref.document(str(data["MasterCode"])), sensitive_data)
-        log_output.append(f"📦 Uploaded {data['Name']}")
+        log(f"📦 Uploaded {data['Name']}")
         op_count += 2
         commit_if_needed()
 
@@ -543,11 +581,17 @@ def run_sync():
                 img.save(img_path)
                 BUCKET.blob(os.path.basename(img_path)).upload_from_filename(img_path)
                 updated_images.append(img_path)
-                log_output.append(f"🖼️  Updated image for {data['Name']}")
+                reporter.count("images")
+                log(f"🖼️  Updated image for {data['Name']}")
             else:
-                log_output.append(f"🖼️  Skipped image (no change) for {data['Name']}")
+                log(f"🖼️  Skipped image (no change) for {data['Name']}")
+
+        reporter.progress(index, total_items)
+
+    reporter.count("items", total_items)
 
     # --- Identify and delete Firestore docs no longer in SQL ---
+    reporter.stage("Removing stale items", 8, 12)
     active_sql_ids = get_all_ids()
     # Load existing Firestore IDs from local cache or fetch from server
     if os.path.exists(local_ids_file):
@@ -562,20 +606,23 @@ def run_sync():
     ids_to_delete = existing_firestore_ids - active_sql_ids
     ids_to_add = active_sql_ids - existing_firestore_ids
     print(len(existing_firestore_ids),len(active_sql_ids))
+    reporter.count("deleted", len(ids_to_delete))
     # to delete items that are deactivated (modification time not updated)
     if ids_to_delete:
-        log_output.append(f"🗑️ Removing {len(ids_to_delete)} stale items from Firestore...")
+        log(f"🗑️ Removing {len(ids_to_delete)} stale items from Firestore...")
         logging.info(f"🗑️ Removing {len(ids_to_delete)} stale items: {sorted(ids_to_delete)}")
         delete_firestore_docs_by_ids(ids_to_delete, collection_ref=ITEMS_COL)
         delete_firestore_docs_by_ids(ids_to_delete, collection_ref=sensitive_ref)
         for doc_id in ids_to_delete:
-            log_output.append(f"🗑️ Deleted stale item and sensitive doc: {doc_id}")
+            log(f"🗑️ Deleted stale item and sensitive doc: {doc_id}")
     else:
-        log_output.append("✅ No stale Firestore items found for deletion.")
+        log("✅ No stale Firestore items found for deletion.")
         logging.info("✅ No stale Firestore items found for deletion.")
     # to add items that are activated (modification time not updated)
+    reporter.stage("Adding new items", 9, 12)
+    reporter.count("added", len(ids_to_add))
     if ids_to_add:
-        log_output.append(f"➕ Uploading {len(ids_to_add)} new items to Firestore...")
+        log(f"➕ Uploading {len(ids_to_add)} new items to Firestore...")
         logging.info(f"➕ Uploading {len(ids_to_add)} new items: {sorted(ids_to_add)}")
 
         # Step 1: Fetch those rows from SQL
@@ -586,7 +633,7 @@ def run_sync():
             sensitive_data = build_sensitive_item_data(row, now)
             batch.set(ITEMS_COL.document(str(data["MasterCode"])), data)
             batch.set(sensitive_ref.document(str(data["MasterCode"])), sensitive_data)
-            log_output.append(f"📦 Uploaded {data['Name']}")
+            log(f"📦 Uploaded {data['Name']}")
             op_count += 2
             commit_if_needed()
             if img:
@@ -595,37 +642,41 @@ def run_sync():
                     img.save(img_path)
                     BUCKET.blob(os.path.basename(img_path)).upload_from_filename(img_path)
                     updated_images.append(img_path)
-                    log_output.append(f"🖼️  Updated image for {data['Name']}")
+                    reporter.count("images")
+                    log(f"🖼️  Updated image for {data['Name']}")
                 else:
-                    log_output.append(f"🖼️  Skipped image (no change) for {data['Name']}")
+                    log(f"🖼️  Skipped image (no change) for {data['Name']}")
 
     else:
-        log_output.append("✅ No new items found for Firestore upload.")
+        log("✅ No new items found for Firestore upload.")
         logging.info("✅ No new items found for Firestore upload.")
 
     # Final commit for any remaining operations
     if op_count > 0:
         batch.commit()
     # ACTIVE MASTER CODES LIST
+    reporter.stage("Publishing active item ids", 10, 12)
     upload_active_ids_to_firestore(active_sql_ids)
     summary = f"✅ Uploaded {len(active_sql_ids)} active_sql_ids "
-    log_output.append(summary)
+    log(summary)
     logging.info(summary)
     # Update Firestore meta
+    reporter.stage("Updating sync metadata", 11, 12)
     META_DOC.update({"latestImportFromServer": now.isoformat()})
 
     summary = f"✅ Uploaded {len(items)} items | 🖼️ {len(updated_images)} images updated"
-    log_output.append(summary)
+    log(summary)
     logging.info(summary)
     # Cache the updated Firestore IDs locally
+    reporter.stage("Saving local caches", 12, 12)
     save_local_firestore_ids(active_sql_ids, local_ids_file)
-    log_output.append(f"💾 Cached Firestore IDs to '{local_ids_file}'")
+    log(f"💾 Cached Firestore IDs to '{local_ids_file}'")
     # Save updated stock snapshot after successful upload
     try:
         save_stock_snapshot(current_snapshot, snapshot_file)
-        log_output.append(f"📊 Saved new stock snapshot to '{snapshot_file}'")
+        log(f"📊 Saved new stock snapshot to '{snapshot_file}'")
     except Exception as e:
-        log_output.append(f"❌ Failed to save stock snapshot: {e}")
+        log(f"❌ Failed to save stock snapshot: {e}")
     return len(items), len(updated_images), now, log_output
 
 # Local cache for Firestore IDs

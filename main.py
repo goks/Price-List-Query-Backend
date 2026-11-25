@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import socket
 import ssl
 import sys
 import tempfile
@@ -16,7 +17,7 @@ from typing import Any, Optional
 
 import pytz
 import certifi
-from PySide6.QtCore import QObject, Property, QRunnable, QStandardPaths, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Property, QRunnable, Qt, QStandardPaths, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QFontDatabase, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -26,6 +27,7 @@ import core
 import backup_service
 import r2_service
 import attendance_service
+import sync_status_service
 
 IST = pytz.timezone("Asia/Calcutta")
 APP_NAME = "GA Price Uploader"
@@ -108,9 +110,44 @@ def get_pythonw_path() -> str:
     return str(executable)
 
 
+def toLocalMoment(value: Any) -> Optional[datetime]:
+    """Parses a Firestore timestamp/ISO string into an IST-aware datetime."""
+    if isinstance(value, datetime):
+        moment = value
+    elif isinstance(value, str):
+        try:
+            moment = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=pytz.utc)
+    return moment.astimezone(IST)
+
+
+def formatSyncMoment(value: Any) -> str:
+    moment = toLocalMoment(value)
+    return moment.strftime("%d-%m-%Y %H:%M:%S") if moment else ""
+
+
+def formatSyncDuration(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "—"
+    total = max(0, int(round(float(seconds))))
+    minutes, remaining = divmod(total, 60)
+    if minutes:
+        return f"{minutes}m {remaining}s"
+    return f"{remaining}s"
+
+
 class MainWindow(QObject):
     progressChanged = Signal(int, int)
     statusChanged = Signal()  # type: ignore
+    syncStatusChanged = Signal()  # type: ignore
+    syncHistoryChanged = Signal()  # type: ignore
+    operationChanged = Signal()  # type: ignore
+    uiCallRequested = Signal(object)  # type: ignore
     isBusyChanged = Signal()  # type: ignore
     lastUpdatedChanged = Signal()  # type: ignore
     logChanged = Signal()  # type: ignore
@@ -147,6 +184,11 @@ class MainWindow(QObject):
         self._isBusy = False
         self._lastUpdated = "Never"
         self._logs: list[str] = []
+        self._syncStatuses: dict[str, dict[str, Any]] = {}
+        self._syncHistoryAll: list[dict[str, Any]] = []
+        self._operation = sync_status_service.KIND_PRICE_LIST
+        self._uiThreadId = threading.get_ident()
+        self.uiCallRequested.connect(self._runUiCall, Qt.ConnectionType.QueuedConnection)
         self.progress = 0
         self.threadpool = QThreadPool()
         self.qmlWindow: Optional[Any] = None  # type: ignore
@@ -167,6 +209,7 @@ class MainWindow(QObject):
         self._backupHistory: list[str] = []
         self._backupPendingAfterDiscovery = False
         self._backupPendingDebugOnly = False
+        self._backupPendingTrigger = "manual"
         self._r2AccountId = ""
         self._r2BucketName = ""
         self._r2AccessKeyId = ""
@@ -211,11 +254,33 @@ class MainWindow(QObject):
             return f'"{sys.executable}" {AUTOSTART_ARGUMENT}'
         return f'"{get_pythonw_path()}" "{os.path.abspath(__file__)}" {AUTOSTART_ARGUMENT}'
 
+    def runOnUiThread(self, action):
+        """Runs ``action`` on the GUI thread; worker threads must use this
+        before touching state that QML bindings read."""
+        if threading.get_ident() == self._uiThreadId:
+            action()
+            return
+        try:
+            self.uiCallRequested.emit(action)
+        except RuntimeError:
+            # The window is being torn down while a worker finishes.
+            pass
+
+    @Slot(object)
+    def _runUiCall(self, action):
+        action()
+
     def appendLog(self, message: str):
+        self.runOnUiThread(lambda: self._appendLogNow(message))
+
+    def _appendLogNow(self, message: str):
         self._logs.append(message)
         self.logChanged.emit()
 
     def setBusy(self, busy: bool):
+        self.runOnUiThread(lambda: self._setBusyNow(busy))
+
+    def _setBusyNow(self, busy: bool):
         if self._isBusy != busy:
             self._isBusy = busy
             self.isBusyChanged.emit()
@@ -358,6 +423,7 @@ class MainWindow(QObject):
         else:
             self._backupPendingAfterDiscovery = True
             self._backupPendingDebugOnly = False
+            self._backupPendingTrigger = "scheduled"
             self.refreshBackupDatabases()
         self.startBackupSchedule()
 
@@ -392,7 +458,7 @@ class MainWindow(QObject):
             )
             return
         self.appendAttendanceLog("Scheduled import started.")
-        self.runAttendanceImport()
+        self.startAttendanceImport("scheduled")
 
     @Slot(str, str, str, result=bool)
     def saveAttendanceSettings(
@@ -511,6 +577,9 @@ class MainWindow(QObject):
 
     @Slot()
     def runAttendanceImport(self):
+        self.startAttendanceImport("manual")
+
+    def startAttendanceImport(self, trigger: str = "manual"):
         if self._isBusy:
             self.setAttendanceStatus("Wait for the current operation to finish.")
             return
@@ -522,10 +591,20 @@ class MainWindow(QObject):
             "Reading device attendance and employee records",
             True,
         )
-        self.threadpool.start(Worker(self.performAttendanceImport))
+        self.threadpool.start(
+            Worker(lambda: self.performAttendanceImport(trigger))
+        )
 
-    def performAttendanceImport(self):
+    def performAttendanceImport(self, trigger: str = "manual"):
+        reporter = self.createSyncReporter(
+            trigger,
+            sync_status_service.KIND_ATTENDANCE,
+        )
+        outcome = sync_status_service.FAILED
+        error: Optional[BaseException] = None
         try:
+            reporter.start()
+            reporter.stage("Reading device data", 1, 3)
             settings = attendance_service.DeviceSettings(
                 self._attendanceHost,
                 self._attendancePort,
@@ -543,6 +622,7 @@ class MainWindow(QObject):
                 "Saving records to Firestore",
                 True,
             )
+            reporter.stage("Saving records", 2, 3)
 
             def report_upload_progress(done: int, total: int, stage: str):
                 fraction = done / total if total else 1
@@ -556,12 +636,16 @@ class MainWindow(QObject):
                     stage,
                     True,
                 )
+                reporter.progress(done, total if total else 1)
 
             counts = attendance_service.upload_snapshot(
                 snapshot,
                 core.firestore_db,
                 progress_callback=report_upload_progress,
             )
+            reporter.count("employees", counts["employees"])
+            reporter.count("attendance", counts["attendance"])
+            reporter.stage("Refreshing today's view", 3, 3)
             self.setAttendanceTodayRows(snapshot)
             message = (
                 f"Import complete: {counts['employees']} employee record(s) refreshed; "
@@ -573,12 +657,20 @@ class MainWindow(QObject):
                 )
             self.setAttendanceStatus(message)
             self.appendAttendanceLog(message)
+            outcome = sync_status_service.SUCCESS
         except Exception as exc:
+            error = exc
             self.setAttendanceStatus(f"Attendance import failed: {exc}")
             self.appendAttendanceLog(f"Import failed: {exc}")
         finally:
             self.attendanceProgressChanged.emit(0, 0, "", False)
             self.setBusy(False)
+            try:
+                reporter.finish(outcome, error)
+                reporter.flush()
+            except Exception:
+                traceback.print_exc()
+            self.startSyncStatusReload()
 
     def setAttendanceTodayRows(
         self,
@@ -652,8 +744,10 @@ class MainWindow(QObject):
                 self._backupPendingAfterDiscovery = False
                 debug_only = self._backupPendingDebugOnly
                 self._backupPendingDebugOnly = False
+                trigger = self._backupPendingTrigger
+                self._backupPendingTrigger = "manual"
                 if discovery_succeeded:
-                    self.startBackupFromSelection(debug_only)
+                    self.startBackupFromSelection(debug_only, trigger)
 
     @Slot(str, bool)
     def setBackupDatabaseSelected(self, database_name: str, selected: bool):
@@ -839,10 +933,11 @@ class MainWindow(QObject):
 
         self._backupPendingDebugOnly = self._backupDebugOnly
         self._backupPendingAfterDiscovery = True
+        self._backupPendingTrigger = "manual"
         self.setBackupStatus("Searching SQL Server for selected company/year databases...")
         self.refreshBackupDatabases()
 
-    def startBackupFromSelection(self, debug_only: bool = False):
+    def startBackupFromSelection(self, debug_only: bool = False, trigger: str = "manual"):
         selected = [
             item for item in self._backupDatabases
             if item.name in self._selectedBackupDatabases
@@ -898,6 +993,7 @@ class MainWindow(QObject):
                     r2_settings,
                     r2_secret,
                     debug_only,
+                    trigger,
                 )
             )
         )
@@ -910,7 +1006,18 @@ class MainWindow(QObject):
         r2_settings: Optional[r2_service.R2Settings] = None,
         r2_secret: Optional[str] = None,
         debug_only: bool = False,
+        trigger: str = "manual",
     ):
+        reporter = self.createSyncReporter(
+            trigger,
+            sync_status_service.KIND_SQL_BACKUP,
+        )
+        outcome = sync_status_service.FAILED
+        error: Optional[BaseException] = None
+        uploading_to_r2 = (
+            not debug_only and r2_settings is not None and r2_secret is not None
+        )
+        stage_total = 4 if uploading_to_r2 else 3
         completed: list[str] = []
         failures: list[str] = []
         cloud_uploaded = 0
@@ -919,7 +1026,10 @@ class MainWindow(QObject):
         upload_cancelled = False
         prepared: list[tuple[backup_service.BackupDatabase, str]] = []
         try:
-            for database in databases:
+            reporter.start()
+            reporter.stage("Preparing backups", 1, stage_total)
+            reporter.progress(0, len(databases))
+            for index, database in enumerate(databases, start=1):
                 try:
                     def report_sql_message(message: str) -> None:
                         self.appendBackupLog(
@@ -947,6 +1057,11 @@ class MainWindow(QObject):
                     failure = f"{database.name}: {exc}"
                     failures.append(failure)
                     self.appendBackupLog(f"Backup failed: {failure}")
+                reporter.progress(index, len(databases))
+
+            reporter.count("databases", len(completed))
+            reporter.count("verified", 0 if debug_only else len(completed))
+            reporter.count("failed", len(failures))
 
             if (
                 not debug_only
@@ -966,6 +1081,8 @@ class MainWindow(QObject):
                 and r2_secret is not None
                 and prepared
             ):
+                reporter.stage("Uploading to R2", 3, stage_total)
+                reporter.progress(0, len(prepared))
                 try:
                     preflight = r2_service.prepare_upload_session(
                         [path for _database, path in prepared],
@@ -995,7 +1112,7 @@ class MainWindow(QObject):
                         f"Prepared local backup(s) retained: {len(prepared)}."
                     )
                 else:
-                    for database, path in prepared:
+                    for position, (database, path) in enumerate(prepared, start=1):
                         try:
                             file_size = Path(path).stat().st_size
                             self.r2TransferChanged.emit(
@@ -1071,6 +1188,7 @@ class MainWindow(QObject):
                             message = f"{database.name}: {exc}"
                             cloud_failures.append(message)
                             self.appendBackupLog(f"R2 upload failed: {message}")
+                        reporter.progress(position, len(prepared))
 
             if upload_cancelled:
                 message = (
@@ -1111,10 +1229,31 @@ class MainWindow(QObject):
                 if r2_settings is not None and not debug_only:
                     message += f" R2 upload complete: {cloud_uploaded} object(s)."
                 self.setBackupStatus(message)
+
+            reporter.count("uploaded", cloud_uploaded)
+            reporter.stage("Finishing up", stage_total, stage_total)
+            if upload_cancelled:
+                outcome = sync_status_service.CANCELLED
+                error = "R2 upload canceled by user"
+            elif failures or cloud_failures or local_cleanup_failures:
+                first_error = failures or cloud_failures or local_cleanup_failures
+                error = first_error[0]
+            else:
+                outcome = sync_status_service.SUCCESS
+        except Exception as exc:
+            error = exc
+            traceback.print_exc()
+            self.appendBackupLog(f"Backup run failed: {exc}")
         finally:
             self.setActiveR2TransferFuture(None)
             self.setR2CancelRequested(False)
             self.setBusy(False)
+            try:
+                reporter.finish(outcome, error)
+                reporter.flush()
+            except Exception:
+                traceback.print_exc()
+            self.startSyncStatusReload()
 
     def setActiveR2TransferFuture(self, transfer_future):
         with self._r2TransferFutureLock:
@@ -1145,8 +1284,7 @@ class MainWindow(QObject):
 
     @Slot()
     def onAutoUpdateTrigger(self):
-        self.appendLog(f"Auto-sync triggered at {datetime.now(IST).strftime('%d-%m-%Y %H:%M')}")
-        self.upload()
+        self.startSync("auto")
 
     @Slot()
     def checkDbConnection(self):
@@ -1204,7 +1342,12 @@ class MainWindow(QObject):
         self.threadpool.start(Worker(self.performClearAndUpload))
 
     def performClearAndUpload(self):
+        reporter = self.createSyncReporter("full_rebuild")
+        outcome = sync_status_service.FAILED
+        error: Optional[BaseException] = None
         try:
+            reporter.start()
+
             def log(message: str):
                 print(message)
                 self.appendLog(message)
@@ -1215,21 +1358,30 @@ class MainWindow(QObject):
             item_count, _image_count, now, _ = core.clear_and_full_upload(
                 log_func=log,
                 on_progress=on_progress,
+                reporter=reporter,
             )
             dt = now.replace(tzinfo=pytz.utc).astimezone(IST)
             self._status = f"Uploaded {item_count} items"
             self._lastUpdated = dt.strftime("%d-%m-%Y %H:%M")
+            outcome = sync_status_service.SUCCESS
         except (KeyboardInterrupt, TimeoutError) as exc:
+            outcome = sync_status_service.CANCELLED
+            error = exc
             self._status = f"Cancelled or timed out: {exc}"
             self.appendLog(f"⚠️ Rebuild interrupted: {exc}")
         except Exception as exc:
+            error = exc
             traceback.print_exc()
             self._status = f"Error: {exc}"
             self.appendLog(str(exc))
         finally:
-            self.setBusy(False)
-            self.statusChanged.emit()
-            self.lastUpdatedChanged.emit()
+            self.runOnUiThread(self.notifySyncFinished)
+            try:
+                reporter.finish(outcome, error)
+                reporter.flush()
+            except Exception:
+                traceback.print_exc()
+            self.startSyncStatusReload()
 
     def getStatus(self):
         return self._status
@@ -1259,6 +1411,47 @@ class MainWindow(QObject):
         return "\n".join(self._logs)
 
     logs = Property(str, getLogs, notify=logChanged)  # type: ignore
+
+    def getSyncStatus(self):
+        return self._syncStatuses.get(self._operation, {})
+
+    syncStatus = Property("QVariantMap", getSyncStatus, notify=syncStatusChanged)  # type: ignore
+
+    def getSyncStatuses(self):
+        return self._syncStatuses
+
+    syncStatuses = Property("QVariantMap", getSyncStatuses, notify=syncStatusChanged)  # type: ignore
+
+    def getSyncHistory(self):
+        return [
+            run
+            for run in self._syncHistoryAll
+            if run.get("kind") == self._operation
+        ][:10]
+
+    syncHistory = Property("QVariantList", getSyncHistory, notify=syncHistoryChanged)  # type: ignore
+
+    def getOperation(self):
+        return self._operation
+
+    def setOperation(self, kind):
+        kind = str(kind)
+        if kind not in sync_status_service.OPERATION_KINDS or kind == self._operation:
+            return
+        self._operation = kind
+        self.operationChanged.emit()
+        self.syncStatusChanged.emit()
+        self.syncHistoryChanged.emit()
+
+    operation = Property(str, getOperation, setOperation, notify=operationChanged)  # type: ignore
+
+    def getOperations(self):
+        return [
+            {"key": kind, "label": sync_status_service.operation_label(kind)}
+            for kind in sync_status_service.OPERATION_KINDS
+        ]
+
+    operations = Property("QVariantList", getOperations, constant=True)  # type: ignore
 
     @Slot()
     def copyLogs(self):
@@ -1798,33 +1991,177 @@ class MainWindow(QObject):
 
     @Slot()
     def upload(self):
+        self.startSync("manual")
+
+    def startSync(self, trigger: str = "manual"):
         if self._isBusy:
             return
         self._status = "Uploading..."
+        label = {"auto": "Scheduled", "manual": "Manual"}.get(trigger, trigger)
+        self._logs = [
+            f"🔄 {label} sync started at {datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')}"
+        ]
+        self.logChanged.emit()
         self.setBusy(True)
         self.progressChanged.emit(0, 0)
         self.statusChanged.emit()
-        self.threadpool.start(Worker(self.performUpload))
+        self.threadpool.start(Worker(lambda: self.performUpload(trigger)))
 
-    def performUpload(self):
+    def createSyncReporter(
+        self,
+        trigger: str,
+        kind: str = sync_status_service.KIND_PRICE_LIST,
+    ) -> sync_status_service.SyncReporter:
+        return sync_status_service.SyncReporter(
+            core.firestore_db,
+            kind=kind,
+            trigger=trigger,
+            app_version=APP_VERSION,
+            host=socket.gethostname(),
+            database=self._dbName,
+            on_update=self.onSyncStatusUpdate,
+        )
+
+    def onSyncStatusUpdate(self, payload: dict[str, Any]):
+        """Called from a worker thread; QML must only be touched on the GUI thread."""
+        self.runOnUiThread(lambda: self.applySyncStatus(payload))
+
+    def applySyncStatus(self, payload: dict[str, Any]):
+        kind = str(payload.get("kind") or sync_status_service.KIND_PRICE_LIST)
+        status = self.decorateSyncRun(payload)
+        self._syncStatuses[kind] = status
+        if kind == self._operation:
+            self.syncStatusChanged.emit()
+        progress = payload.get("progress") or {}
+        total = int(progress.get("total") or 0)
+        if total > 0 and kind == sync_status_service.KIND_PRICE_LIST:
+            self.progressChanged.emit(int(progress.get("done") or 0), total)
+
+    def decorateSyncRun(self, payload: dict[str, Any]) -> dict[str, Any]:
+        run = dict(payload or {})
+        kind = str(run.get("kind") or sync_status_service.KIND_PRICE_LIST)
+        run["kind"] = kind
+        run["kindLabel"] = (
+            str(run.get("kindLabel") or "")
+            or sync_status_service.operation_label(kind)
+        )
+        state = str(run.get("state") or "")
+        stale = bool(run.get("stale")) or sync_status_service.is_stale(run)
+        state_labels = {
+            sync_status_service.RUNNING: "Interrupted" if stale else "Running",
+            sync_status_service.SUCCESS: "Success",
+            sync_status_service.FAILED: "Failed",
+            sync_status_service.CANCELLED: "Cancelled",
+        }
+        run["stateLabel"] = state_labels.get(state, state.title() or "Unknown")
+        run["stateKey"] = "interrupted" if stale else state
+
+        stage = str(run.get("stage") or "")
+        index = run.get("stageIndex")
+        total = run.get("stageTotal")
+        if stage and index and total:
+            run["stageLabel"] = f"{index}/{total} · {stage}"
+        else:
+            run["stageLabel"] = stage or "Waiting for the first update"
+
+        run["startedLabel"] = formatSyncMoment(run.get("startedAt")) or "—"
+        run["finishedLabel"] = formatSyncMoment(run.get("finishedAt")) or "—"
+        duration = run.get("durationSeconds")
+        if duration is None:
+            started = toLocalMoment(run.get("startedAt"))
+            finished = toLocalMoment(run.get("finishedAt"))
+            if started and finished:
+                duration = (finished - started).total_seconds()
+        run["durationLabel"] = formatSyncDuration(duration)
+        run["triggerLabel"] = {
+            "auto": "Scheduled",
+            "scheduled": "Scheduled",
+            "manual": "Manual",
+            "full_rebuild": "Full rebuild",
+        }.get(str(run.get("trigger") or ""), str(run.get("trigger") or "Manual"))
+
+        counts = run.get("counts") or {}
+        labels = run.get("countLabels") or (
+            sync_status_service.DEFAULT_COUNT_LABELS.get(kind, {})
+        )
+        run["countTiles"] = [
+            {
+                "key": key,
+                "label": str(label),
+                "value": int(counts.get(key) or 0),
+            }
+            for key, label in labels.items()
+        ]
+        run["countsLabel"] = ", ".join(
+            f"{tile['value']} {tile['label'].lower()}" for tile in run["countTiles"]
+        )
+        return run
+
+    def loadSyncStatus(self):
         try:
-            item_count, image_count, now, logs = core.run_sync()
+            statuses = sync_status_service.read_latest_all(core.firestore_db)
+            history = sync_status_service.read_history(core.firestore_db, limit=30)
+            runs = [self.decorateSyncRun(item) for item in history]
+            decorated = {
+                kind: self.decorateSyncRun(payload)
+                for kind, payload in statuses.items()
+            }
+        except Exception as exc:
+            print("Error loading sync status:", exc)
+            return
+
+        def apply():
+            self._syncStatuses.update(decorated)
+            self._syncHistoryAll = runs
+            self.syncStatusChanged.emit()
+            self.syncHistoryChanged.emit()
+
+        self.runOnUiThread(apply)
+
+    def performUpload(self, trigger: str = "manual"):
+        reporter = self.createSyncReporter(trigger)
+        outcome = sync_status_service.FAILED
+        error: Optional[BaseException] = None
+        try:
+            reporter.start()
+            item_count, image_count, now, _run_logs = core.run_sync(
+                reporter=reporter,
+                log_callback=self.appendLog,
+            )
             dt = now.replace(tzinfo=pytz.utc).astimezone(IST)
             self._status = f"Success: {item_count} items, {image_count} images"
             self._lastUpdated = dt.strftime("%d-%m-%Y %H:%M")
-            self._logs = logs
+            outcome = sync_status_service.SUCCESS
         except (KeyboardInterrupt, TimeoutError) as exc:
+            outcome = sync_status_service.CANCELLED
+            error = exc
             self._status = f"Cancelled or timed out: {exc}"
             self.appendLog(f"⚠️ Sync interrupted: {exc}")
         except Exception as exc:
+            error = exc
             traceback.print_exc()
             self._status = f"Error: {exc}"
             self.appendLog(str(exc))
         finally:
-            self.setBusy(False)
-            self.statusChanged.emit()
-            self.lastUpdatedChanged.emit()
-            self.logChanged.emit()
+            self.runOnUiThread(self.notifySyncFinished)
+            try:
+                reporter.finish(outcome, error)
+                reporter.flush()
+            except Exception:
+                traceback.print_exc()
+            self.startSyncStatusReload()
+
+    def notifySyncFinished(self):
+        self._setBusyNow(False)
+        self.statusChanged.emit()
+        self.lastUpdatedChanged.emit()
+        self.logChanged.emit()
+
+    def startSyncStatusReload(self):
+        try:
+            self.threadpool.start(Worker(self.loadSyncStatus))
+        except RuntimeError:
+            pass
 
 
 class Worker(QRunnable):
@@ -1894,6 +2231,7 @@ if __name__ == "__main__":
         core.SERVERNAME = win._dbServer
         core.DATABASENAME = win._dbName
         win.threadpool.start(Worker(win.loadLastUpdated))
+        win.threadpool.start(Worker(win.loadSyncStatus))
         win.checkDbConnection()
         win.checkForUpdates()
         if win._autostartEnabled != win.checkWindowsAutostart():

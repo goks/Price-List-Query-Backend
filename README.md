@@ -11,6 +11,55 @@ GOTO https://www.pythonguis.com/ to know about build process
 - add option to update or rewrite whole db
 - add option to image rewrite.
 
+## Operation status
+
+Every long-running operation publishes its progress to Firestore so it can be
+followed live from this app or any other consumer:
+
+| Operation | `kind` |
+| --- | --- |
+| Price-list sync (and full rebuild) | `price_list` |
+| SQL Server backups (and R2 upload) | `sql_backup` |
+| eTimeTrackLite attendance import | `attendance` |
+
+- `DB_Service/sync_status` — one document holding the latest run of every
+  operation under `latest.<kind>`. Its top-level fields always describe the
+  latest price-list sync, so consumers written before the per-operation layout
+  keep working.
+- `sync_runs/<runId>` — one document per run, pruned to the newest 50 **per
+  operation**.
+
+Each run has this shape (`schemaVersion` 2):
+
+| Field | Meaning |
+| --- | --- |
+| `kind`, `kindLabel` | `price_list` / `sql_backup` / `attendance` |
+| `runId` | Sortable run id, e.g. `20261124T111500Z-a1b2` |
+| `state` | `running`, `success`, `failed` or `cancelled` |
+| `trigger` | `manual`, `scheduled` (or `auto`) or `full_rebuild` |
+| `stage`, `stageIndex`, `stageTotal` | Current step, e.g. `Uploading items` 7/12 |
+| `progress` | `{done, total}` units for the current stage, or `null` |
+| `counts` | Per-operation counters, labelled by `countLabels` |
+| `startedAt`, `finishedAt`, `heartbeatAt` | Firestore timestamps (UTC) |
+| `durationSeconds` | Wall-clock run time once finished |
+| `error` | Failure message for `failed`/`cancelled` runs |
+| `host`, `database`, `appVersion` | Where and by which build the run happened |
+
+`counts` carries the counters that suit the operation:
+
+- `price_list`: `items`, `images`, `deleted`, `added`
+- `sql_backup`: `databases`, `verified`, `uploaded`, `failed`
+- `attendance`: `employees`, `attendance`
+
+`heartbeatAt` refreshes with every published update. A run that still says
+`running` after five minutes without a heartbeat was interrupted and is shown
+as such. The documents contain no item-level or sensitive data, so they are
+safe to expose read-only to a consumer app.
+
+Updates are written by a background thread and coalesced, so publishing never
+slows an operation down; the final state is flushed before the app reports the
+run as finished.
+
 ## SQL Express Backups
 
 The desktop app has a separate **SQL Backups** tab. Refresh the database list to find

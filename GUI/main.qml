@@ -37,6 +37,27 @@ Window {
     property int attendanceTransferTotal: 0
     property string attendanceTransferStage: ""
     property bool attendanceTransferActive: false
+    property int syncProgressDone: backend.syncStatus.progress
+                                    ? (backend.syncStatus.progress.done || 0) : 0
+    property int syncProgressTotal: backend.syncStatus.progress
+                                     ? (backend.syncStatus.progress.total || 0) : 0
+    property var recentSyncRuns: (backend.syncHistory || []).slice(0, 5)
+
+    function syncStateColor(stateKey) {
+        switch (stateKey) {
+        case "success":
+            return "#2E6F40"
+        case "failed":
+        case "interrupted":
+            return "#A23B2A"
+        case "cancelled":
+            return "#8A6A1F"
+        case "running":
+            return "#31525B"
+        default:
+            return "#5F6B6D"
+        }
+    }
 
     function showToast(message, tone) {
         toastMessage = message
@@ -1462,6 +1483,7 @@ Window {
 
                                 delegate: Rectangle {
                                     required property var modelData
+                                    required property int index
                                     width: attendanceTodayList.width - 10
                                     height: 34
                                     color: index % 2 === 0 ? "#F7F9F6" : "white"
@@ -1986,6 +2008,307 @@ Window {
                             accentColor: "#8CC6D2"
                             buttonHeight: 50
                         }
+                    }
+                }
+            }
+
+            Rectangle {
+                id: syncStatusCard
+                Layout.fillWidth: true
+                radius: 22
+                color: window.panel
+                implicitHeight: syncStatusContent.implicitHeight + 48
+                visible: featureTabs.currentIndex === 0
+
+                ColumnLayout {
+                    id: syncStatusContent
+                    anchors.fill: parent
+                    anchors.margins: 24
+                    spacing: 14
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            text: "Sync Status"
+                            font.pixelSize: 22
+                            font.family: "Poppins SemiBold"
+                            color: "#102542"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            radius: 12
+                            implicitWidth: syncStateLabel.implicitWidth + 24
+                            implicitHeight: 26
+                            color: backend.syncStatus.stateKey
+                                   ? window.syncStateColor(backend.syncStatus.stateKey)
+                                   : "#5F6B6D"
+
+                            Text {
+                                id: syncStateLabel
+                                anchors.centerIn: parent
+                                text: backend.syncStatus.stateLabel || "No runs yet"
+                                font.pixelSize: 11
+                                font.family: "Poppins Medium"
+                                color: "white"
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Repeater {
+                            model: backend.operations
+
+                            Rectangle {
+                                required property var modelData
+                                id: operationPill
+                                radius: 12
+                                implicitHeight: 28
+                                implicitWidth: operationPillLabel.implicitWidth + 28
+                                color: backend.operation === modelData.key
+                                       ? "#31525B" : "#E4EAE0"
+
+                                Text {
+                                    id: operationPillLabel
+                                    anchors.centerIn: parent
+                                    text: modelData.label
+                                    font.pixelSize: 11
+                                    font.family: "Poppins Medium"
+                                    color: backend.operation === modelData.key
+                                           ? "white" : "#31525B"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: backend.operation = operationPill.modelData.key
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: backend.syncStatus.stageLabel
+                                  || "Run this operation to publish its progress here and to Firestore."
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: 14
+                            font.family: "Poppins Medium"
+                            color: "#102542"
+                        }
+
+                        Text {
+                            text: backend.syncStatus.runId
+                                  ? (backend.syncStatus.triggerLabel + "  ·  "
+                                     + backend.syncStatus.durationLabel)
+                                  : ""
+                            font.pixelSize: 12
+                            font.family: "Poppins"
+                            color: "#46616B"
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        visible: window.syncProgressTotal > 0
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 8
+                            radius: 4
+                            color: "#D2DBD7"
+
+                            Rectangle {
+                                width: parent.width * Math.min(
+                                    1,
+                                    window.syncProgressTotal > 0
+                                        ? window.syncProgressDone / window.syncProgressTotal
+                                        : 0
+                                )
+                                height: parent.height
+                                radius: 4
+                                color: window.syncStateColor(backend.syncStatus.stateKey)
+
+                                Behavior on width {
+                                    NumberAnimation { duration: 200 }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: window.syncProgressDone + " / " + window.syncProgressTotal
+                            font.pixelSize: 11
+                            font.family: "Poppins Medium"
+                            color: "#31525B"
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        visible: (backend.syncStatus.countTiles || []).length > 0
+
+                        Repeater {
+                            model: backend.syncStatus.countTiles || []
+
+                            Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                radius: 14
+                                color: window.panelAlt
+                                implicitHeight: 48
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    spacing: 0
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: modelData.value
+                                        font.pixelSize: 16
+                                        font.family: "Poppins SemiBold"
+                                        color: "#102542"
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: modelData.label
+                                        font.pixelSize: 10
+                                        font.family: "Poppins"
+                                        color: "#5F6B6D"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        visible: !!backend.syncStatus.error
+                        radius: 12
+                        color: "#F6E3DE"
+                        implicitHeight: syncErrorText.implicitHeight + 20
+
+                        Text {
+                            id: syncErrorText
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            text: backend.syncStatus.error || ""
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: 11
+                            font.family: "Poppins"
+                            color: "#A23B2A"
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: "#D2DBD7"
+                        visible: window.recentSyncRuns.length > 0
+                    }
+
+                    Text {
+                        text: "Recent runs"
+                        visible: window.recentSyncRuns.length > 0
+                        font.pixelSize: 12
+                        font.family: "Poppins Medium"
+                        color: "#31525B"
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        visible: window.recentSyncRuns.length > 0
+
+                        Repeater {
+                            model: window.recentSyncRuns
+
+                            Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                implicitHeight: 40
+                                radius: 10
+                                color: "#F2F5EE"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 10
+
+                                    Rectangle {
+                                        width: 8
+                                        height: 8
+                                        radius: 4
+                                        color: window.syncStateColor(modelData.stateKey)
+                                    }
+
+                                    Text {
+                                        Layout.preferredWidth: 80
+                                        text: modelData.stateLabel
+                                        font.pixelSize: 11
+                                        font.family: "Poppins Medium"
+                                        color: "#102542"
+                                    }
+
+                                    Text {
+                                        Layout.preferredWidth: 84
+                                        text: modelData.triggerLabel
+                                        font.pixelSize: 11
+                                        font.family: "Poppins"
+                                        color: "#5F6B6D"
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.startedLabel
+                                        elide: Text.ElideRight
+                                        font.pixelSize: 11
+                                        font.family: "Poppins"
+                                        color: "#46616B"
+                                    }
+
+                                    Text {
+                                        Layout.preferredWidth: 64
+                                        horizontalAlignment: Text.AlignRight
+                                        text: modelData.durationLabel
+                                        font.pixelSize: 11
+                                        font.family: "Poppins Medium"
+                                        color: "#31525B"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: backend.syncStatus.runId
+                              ? (backend.syncStatus.host + "  ·  "
+                                 + backend.syncStatus.database + "  ·  v"
+                                 + backend.syncStatus.appVersion)
+                              : "Progress is published to Firestore (DB_Service/sync_status) for other apps."
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 10
+                        font.family: "Poppins"
+                        color: "#7A8B92"
                     }
                 }
             }
